@@ -1,0 +1,30 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "windows",
+      "displayName": "Windows (Visual Studio 2022, x64)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "mac",
+      "displayName": "macOS (Xcode, universal)",
+      "generator": "Xcode",
+      "binaryDir": "${sourceDir}/build-mac",
+      "cacheVariables": {
+        "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "11.0",
+        "CMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY": "-"
+      },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "windows-release", "configurePreset": "windows", "configuration": "Release" },
+    { "name": "windows-debug", "configurePreset": "windows", "configuration": "Debug" },
+    { "name": "mac-release", "configurePreset": "mac", "configuration": "Release" }
+  ]
+}
