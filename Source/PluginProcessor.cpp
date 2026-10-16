@@ -891,7 +891,7 @@ bool KerfAudioProcessor::writeChopMidi (int chopId, const juce::File& target) co
     target.getParentDirectory().createDirectory();
     target.deleteFile();
     juce::FileOutputStream out (target);
-    return out.openedOk() && file.writeTo (out);
+    return out.openedOk() && file.writeTo (out, 0); // type 0: one track (what every DAW reads)
 }
 
 bool KerfAudioProcessor::writePatternMidi (const juce::File& target) const
@@ -901,7 +901,10 @@ bool KerfAudioProcessor::writePatternMidi (const juce::File& target) const
     juce::MidiMessageSequence seq;
     seq.addEvent (juce::MidiMessage::textMetaEvent (3, "KERF pattern"), 0.0); // track name
     seq.addEvent (juce::MidiMessage::tempoMetaEvent (juce::roundToInt (60000000.0 / std::max (20.0, getEffectiveTempo()))), 0.0);
-    seq.addEvent (juce::MidiMessage::timeSignatureMetaEvent (4, 4), 0.0);
+    // 4/4 written by hand: JUCE's own time signature says 1 MIDI clock per click and 96
+    // 32nds per quarter (the standard is 24 and 8) - a DAW that reads them gets the bars wrong.
+    const juce::uint8 fourFour[] = { 0xff, 0x58, 0x04, 4, 2, 24, 8 };
+    seq.addEvent (juce::MidiMessage (fourFour, (int) sizeof (fourFour)), 0.0);
 
     // Swing, humanize, repeats, chance and random chops exactly as the first pass plays
     // them. (A step's pitch and slide have no place in a plain note list: each chop is one
@@ -938,7 +941,7 @@ bool KerfAudioProcessor::writePatternMidi (const juce::File& target) const
     target.getParentDirectory().createDirectory();
     target.deleteFile();
     juce::FileOutputStream out (target);
-    return out.openedOk() && file.writeTo (out);
+    return out.openedOk() && file.writeTo (out, 0); // type 0: one track (what every DAW reads)
 }
 
 bool KerfAudioProcessor::startRecording (AudioRecorder::Source source, double lengthBars)
