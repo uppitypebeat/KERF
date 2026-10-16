@@ -40,7 +40,7 @@ private:
 
     Segmented gridValue { { "1/1", "1/2", "1/4", "1/8", "1/16", "1/32" }, 4 };
     Segmented gridModifier { { "STR", "TRI", "DUP", "DOT" } };
-    ValueField count { 2, 256, 1, 0 };
+    ValueField count { 2, 68, 1, 0 }; // at most 68: from the root note (middle C) up to the last MIDI note, one chop per key
     ValueField sensitivity { 0, 100, 1, 0 };
     ValueField minDistance { 10, 1000, 5, 0 };
     Segmented beats { { "1/2", "1", "2", "BAR" }, 1 };
