@@ -80,8 +80,9 @@ private:
     IdleGate idle; // rests while nothing moves
 };
 
-/** The 12 TIME slots as cards (a mini picture of each curve). Click: switch that slot on
-    (or off again); right-click: back to the factory shape. */
+/** The 12 TIME slots as cards (a mini picture of each curve). Click: switch that slot on;
+    the active one again: its TIME and VOLUME curves back to the factory shape (unchanged:
+    off). Right-click: a menu. */
 class TimeSlots final : public juce::Component, private AnimationClock::Client
 {
 public:
@@ -97,6 +98,8 @@ public:
     std::function<void (int)> onBankChanged; // it switched by itself (a slot in another bank came on)
 
     void mouseDown (const juce::MouseEvent&) override;
+    /** A click on slot `k`: on (and shown); the active one again: its curves reset, or off. */
+    void clickSlot (int k);
 
 private:
     void animationTick (double dt) override;

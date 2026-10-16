@@ -766,9 +766,18 @@ void TimeSlots::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    // Click: this slot on (and shown); the active one again: off.
+    clickSlot (k);
+}
+
+void TimeSlots::clickSlot (int k)
+{
+    // This slot on (and shown). The active one again: its TIME and VOLUME curves back to the
+    // factory shape (it stays on); when there is nothing to reset: off.
     setTimeEditSlot (processor, k);
-    processor.setParameterAsGesture (Params::timeSlot, activeSlot (processor) == k ? 0.0f : (float) (k + 1));
+    if (activeSlot (processor) == k && processor.isTimeSlotEdited (k))
+        processor.resetTimeSlot (k);
+    else
+        processor.setParameterAsGesture (Params::timeSlot, activeSlot (processor) == k ? 0.0f : (float) (k + 1));
 }
 
 } // namespace kerf::ui

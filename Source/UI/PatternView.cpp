@@ -114,7 +114,7 @@ PatternView::PatternView (KerfAudioProcessor& p, AnimationClock& c) : processor 
     };
 
     addAndMakeVisible (dice);
-    dice.setTooltip ("Roll a pattern: KERF hears which chops are kick, snare, hat or tones (and their pitch) and writes a groove for the tempo - boom bap, trap, drill, house, drum and bass, stutter, jersey club, amapiano, flip or a chop-up of the slices - with melodies, 808s and log drums in the key, other players and a hook every roll, never the same pattern twice. As many bars as set. Right-click: pick a style. Ctrl+Z: the old one");
+    dice.setTooltip ("Random pattern for your chops. Right-click: pick a style");
     dice.onClick = [this] { randomPattern(); };
     dice.onRightClick = [this] { showDiceMenu(); };
 
