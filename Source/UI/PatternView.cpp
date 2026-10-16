@@ -114,7 +114,7 @@ PatternView::PatternView (KerfAudioProcessor& p, AnimationClock& c) : processor 
     };
 
     addAndMakeVisible (dice);
-    dice.setTooltip ("Random pattern for your chops. Right-click: pick a style");
+    dice.setTooltip ("Random pattern for your chops. Right-click: mode and style");
     dice.onClick = [this] { randomPattern(); };
     dice.onRightClick = [this] { showDiceMenu(); };
 
@@ -433,8 +433,15 @@ void PatternView::paint (juce::Graphics& g)
 
 }
 
-void PatternView::animationTick (double)
+void PatternView::animationTick (double dt)
 {
+    // The die turns once after a roll (eased out), then rests.
+    if (diceSpin < 1.0f)
+    {
+        diceSpin = std::min (1.0f, diceSpin + (float) dt / 0.35f);
+        dice.setTurn (diceSpin < 1.0f ? juce::MathConstants<float>::twoPi * (1.0f - std::pow (1.0f - diceSpin, 3.0f)) : 0.0f);
+    }
+
     const auto step = processor.isPatternPlaying() ? processor.getPatternStep() : -1;
     if (step != playingStep)
     {
@@ -779,11 +786,18 @@ void PatternView::exportTo (bool pattern, int bitDepth, int loops)
 
 void PatternView::showDiceMenu()
 {
-    // Right-click on the die: roll in a style of your choice (it stays until AUTO).
+    // Right-click on the die: its character (MODE) and the genre (STYLE). Both stay until
+    // changed (with the project); picking one rolls right away.
+    const auto mode = (int) processor.getSettings().getProperty ("diceMode", 0);
     juce::PopupMenu menu;
-    menu.addSectionHeader ("ROLL A STYLE");
+    menu.addSectionHeader ("MODE");
+    static const char* modeHints[] = { "musical, varied", "rhythm first", "dense, short, fast", "pitch and melody",
+                                       "held, ghosted, airy", "sparse, lots of space", "wild" };
+    const auto modes = PatternDice::modeNames();
+    for (int i = 0; i < modes.size(); ++i)
+        menu.addItem (200 + i, modes[i] + "  -  " + modeHints[juce::jlimit (0, 6, i)], true, mode == i);
+    menu.addSectionHeader ("STYLE");
     menu.addItem (1, "Auto - fits the tempo, a new one every roll", true, diceStyle < 0);
-    menu.addSeparator();
     const auto names = PatternDice::styleNames();
     for (int i = 0; i < names.size(); ++i)
         menu.addItem (100 + i, names[i], true, diceStyle == i);
@@ -793,29 +807,28 @@ void PatternView::showDiceMenu()
                         {
                             if (safe == nullptr || result == 0)
                                 return;
-                            safe->diceStyle = result >= 100 ? result - 100 : -1;
+                            if (result >= 200)
+                                safe->processor.getSettings().setProperty ("diceMode", result - 200, nullptr);
+                            else
+                                safe->diceStyle = result >= 100 ? result - 100 : -1;
                             safe->randomPattern();
                         });
 }
 
 void PatternView::randomPattern()
 {
-    // The die (PatternDice): it listens to the chops first (which is a kick, a snare, a hat,
-    // which are tones, and their pitch), picks a style for the tempo (never the last one
-    // twice) and writes it with everything the step grid can do, tuned notes in the key.
-    // Exactly as many bars as set; one undo step.
+    // The die (PatternDice): it listens to the chops (cached: each one once), makes a pattern
+    // with a form, motifs, variation, transitions and an ending, checks it, and writes it
+    // into the pattern as one undo step - an ordinary pattern, edited like any other.
     const auto& info = processor.getSampleInfo();
     const auto list = processor.getChops().getChops();
     if (info.sample == nullptr || list.empty())
         return;
-
-    std::vector<PatternDice::ChopTraits> traits;
-    for (const auto& c : list)
-        traits.push_back (PatternDice::describe (*info.sample, c));
+    const auto traits = diceTraits.get (*info.sample, list);
 
     auto& pattern = processor.getPattern();
-    juce::Random rng; // a new pattern every time
     const auto key = processor.getSoundingKey();
+    const std::vector<std::vector<PatternEvent>> recent (recentPatterns.begin(), recentPatterns.end());
     PatternDice::Options options;
     options.bars = pattern.getBars();
     options.bpm = info.sourceBpm;
@@ -823,13 +836,22 @@ void PatternView::randomPattern()
     options.minor = key.tonic < 0 || key.minor;
     options.style = diceStyle;
     options.avoidStyle = lastDiceStyle;
+    options.mode = (int) processor.getSettings().getProperty ("diceMode", 0);
+    options.seed = juce::Random::getSystemRandom().nextInt64(); // a new pattern every time (and the same one again from this seed)
+    options.recent = &recent;
     // Never a pattern seen in the last rolls (with few chops and one bar the same can come up).
-    auto rolled = PatternDice::roll (traits, options, rng);
+    auto rolled = PatternDice::roll (traits, options);
     for (int attempt = 0; attempt < 12 && std::find (recentRolls.begin(), recentRolls.end(), PatternDice::fingerprint (rolled.events)) != recentRolls.end(); ++attempt)
-        rolled = PatternDice::roll (traits, options, rng);
+    {
+        options.seed = juce::Random::getSystemRandom().nextInt64();
+        rolled = PatternDice::roll (traits, options);
+    }
     recentRolls.push_back (PatternDice::fingerprint (rolled.events));
     while (recentRolls.size() > 64)
         recentRolls.pop_front();
+    recentPatterns.push_back (rolled.events);
+    while (recentPatterns.size() > 8)
+        recentPatterns.pop_front();
     lastDiceStyle = rolled.style;
 
     auto& um = processor.getUndoManager();
@@ -845,10 +867,17 @@ void PatternView::randomPattern()
         if (e.slide)         pattern.setSlide (e.step, true);
     }
     um.beginNewTransaction();
-    auto details = juce::String (pattern.getBars()) + (pattern.getBars() == 1 ? " bar" : " bars");
+    diceSpin = 0.0f; // the die turns once
+
+    // What it made, in a few words.
+    auto text = "Dice: " + rolled.name;
+    if (options.mode != 0)
+        text = "Dice " + PatternDice::modeNames()[options.mode] + ": " + rolled.name;
+    if (rolled.idea.isNotEmpty())
+        text << " - " << rolled.idea;
     if (rolled.inKey)
-        details << ", in " << KeyAnalyzer::noteName (key.tonic) << (key.minor ? " minor" : " major");
-    processor.setStatusMessage ("Random pattern: " + rolled.name + " (" + details + ") - roll again, right-click: style, Ctrl+Z: undo");
+        text << ", in " << KeyAnalyzer::noteName (key.tonic) << (key.minor ? " minor" : " major");
+    processor.setStatusMessage (text);
 }
 
 } // namespace kerf::ui

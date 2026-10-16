@@ -93,6 +93,9 @@ set(KERF_CORE_SOURCES
     Source/Arrangement/PatternModel.cpp
     Source/Arrangement/PatternPlayer.cpp
     Source/Arrangement/PatternDice.cpp
+    Source/Arrangement/DiceStyles.cpp
+    Source/Arrangement/DiceGenerator.cpp
+    Source/Arrangement/DiceEvaluator.cpp
     Source/Arrangement/AudioRecorder.cpp
     Source/AudioEngine/ChopTools.cpp
     Source/AudioEngine/SampleLoader.cpp

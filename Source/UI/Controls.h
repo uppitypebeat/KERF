@@ -160,6 +160,7 @@ public:
     void setIconWhenOn (Icon i) { onIcon = i; hasOnIcon = true; repaint(); } // e.g. play -> stop while playing
     void setDangerOnHover (bool b) { dangerOnHover = b; repaint(); } // red under the mouse (a destructive action)
     void setAttention (float a) { if (a != attention) { attention = a; repaint(); } } // 0..1: an accent glow (e.g. an update is out)
+    void setTurn (float radians) { if (radians != turn) { turn = radians; repaint(); } } // the symbol turned (e.g. the die after a roll)
     std::function<void()> onRightClick; // e.g. a menu of options
     // Only the left button clicks (a right-click does nothing, or opens `onRightClick`).
     void mouseDown (const juce::MouseEvent& e) override
@@ -176,6 +177,7 @@ private:
     bool hasOnIcon = false;
     bool dangerOnHover = false;
     float attention = 0.0f;
+    float turn = 0.0f;
 };
 
 /** A row of mutually exclusive text options (e.g. STR | TRI | DUP | DOT). */

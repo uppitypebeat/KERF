@@ -2,6 +2,7 @@
 
 #include "Controls.h"
 #include "../PluginProcessor.h"
+#include "../Arrangement/PatternDice.h"
 #include <deque>
 
 namespace kerf::ui
@@ -111,6 +112,9 @@ private:
     int diceStyle = -1;     // a style picked on the die's menu (-1: one that suits the tempo)
     int lastDiceStyle = -1; // the last roll's (the next one takes another)
     std::deque<juce::int64> recentRolls; // fingerprints of the last rolls (never the same twice)
+    std::deque<std::vector<PatternEvent>> recentPatterns; // the last few rolls: a new one must differ
+    PatternDice::TraitCache diceTraits;  // each chop listened to once
+    float diceSpin = 1.0f;               // the die's turn after a roll (0..1, 1 = at rest)
     void showDiceMenu();
     DragChip audioDrag { "AUDIO" }, midiDrag { "MIDI" };
     ValueField swingField { 50, 75, 1, 0 }, humanField { 0, 100, 1, 0 };

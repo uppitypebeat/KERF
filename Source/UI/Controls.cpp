@@ -471,7 +471,8 @@ void IconButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
 
     // Symbols are drawn on a 16 x 16 grid, centred in the button.
     const auto box = r.withSizeKeepingCentre (14.0f, 14.0f).translated (0.0f, down ? 0.5f : 0.0f);
-    const auto toBox = juce::AffineTransform::scale (box.getWidth() / 16.0f).translated (box.getX(), box.getY());
+    const auto toBox = juce::AffineTransform::scale (box.getWidth() / 16.0f).translated (box.getX(), box.getY())
+                           .rotated (turn, box.getCentreX(), box.getCentreY());
     const juce::PathStrokeType line (1.7f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
     g.setColour (fg);
 
