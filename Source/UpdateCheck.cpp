@@ -64,6 +64,24 @@ Result parseFeed (const juce::String& text, const juce::String& current, const j
     return r;
 }
 
+namespace
+{
+    bool startCheckLaunched = false, startFoundNewer = false, startNoticed = false;
+}
+
+void checkOnceAtStart()
+{
+    if (startCheckLaunched)
+        return;
+    startCheckLaunched = true;
+    checkAsync ([] (Result r) { startFoundNewer = r.status == Result::Status::newer; });
+}
+
+bool updateAvailable() { return startFoundNewer; }
+bool updateNoticed()   { return startNoticed; }
+void setUpdateNoticed() { startNoticed = true; }
+void simulateStartResult (bool newer) { startCheckLaunched = true; startFoundNewer = newer; startNoticed = false; }
+
 void checkAsync (std::function<void (Result)> onDone)
 {
     if (juce::String (feedUrl).isEmpty())

@@ -35,4 +35,16 @@ namespace kerf::updates
 
     /** Reads the feed on a background thread; `onDone` runs on the message thread. */
     void checkAsync (std::function<void (Result)> onDone);
+
+    /** The check when KERF opens: once per run of the DAW (every KERF window shares its
+        answer). Message thread only, like the two below. */
+    void checkOnceAtStart();
+    /** That check found a newer version (false until it is known, or offline). */
+    bool updateAvailable();
+    /** The menu has been opened since: the menu button stops blinking (the dot by "Check for
+        updates" stays while there is an update). */
+    bool updateNoticed();
+    void setUpdateNoticed();
+    /** For the screenshot tool: as if the check at start had answered (no network). */
+    void simulateStartResult (bool newer);
 }

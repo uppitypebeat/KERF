@@ -1,6 +1,7 @@
 #include "HeaderBar.h"
 #include "../FactoryPresets.h"
 #include "RecordOverlay.h"
+#include "../UpdateCheck.h"
 
 namespace kerf::ui
 {
@@ -52,6 +53,8 @@ float HeaderBar::brandInkWidth()
 HeaderBar::HeaderBar (KerfAudioProcessor& p, AnimationClock& c)
     : processor (p), clock (c), blade (p, c)
 {
+    updates::checkOnceAtStart(); // is there a newer KERF? (once per run; the menu button pulses if so)
+
     addAndMakeVisible (blade);
 
     addAndMakeVisible (bpmField);
@@ -137,6 +140,14 @@ void HeaderBar::updateFromProcessor()
 
 void HeaderBar::animationTick (double dt)
 {
+    // An update is out (found when KERF opened) and the menu not opened yet: it pulses.
+    if (updates::updateAvailable() && ! updates::updateNoticed())
+    {
+        updateBlink += dt;
+        menuButton.setAttention (0.5f + 0.5f * std::sin ((float) updateBlink * juce::MathConstants<float>::twoPi * 0.8f));
+    }
+    else
+        menuButton.setAttention (0.0f);
     // Preset name and A / B follow the processor (loading, undo, a project); a * after the
     // name once anything differs from the preset (checked five times a second).
     if (const auto name = processor.getPresetName(); name != shownPreset)
@@ -462,10 +473,14 @@ void HeaderBar::nextTheme()
 
 void HeaderBar::showMainMenu()
 {
+    // Opened once: the button stops blinking. While an update is out, a dot by the item.
+    updates::setUpdateNoticed();
+    menuButton.setAttention (0.0f);
     juce::PopupMenu menu;
     menu.addItem ("About KERF", [this] { if (onAbout) onAbout(); });
     menu.addItem ("Guide", [this] { if (onShowGuide) onShowGuide(); });
-    menu.addItem ("Check for updates", [this] { if (onCheckUpdates) onCheckUpdates(); });
+    menu.addItem (updates::updateAvailable() ? "Check for updates  -  a new version is out" : "Check for updates",
+                  true, updates::updateAvailable(), [this] { if (onCheckUpdates) onCheckUpdates(); });
 
     menu.setLookAndFeel (&getLookAndFeel()); // the plugin's menu style (menus use the default look otherwise)
 

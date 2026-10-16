@@ -787,6 +787,7 @@ void PatternView::showDiceMenu()
     const auto names = PatternDice::styleNames();
     for (int i = 0; i < names.size(); ++i)
         menu.addItem (100 + i, names[i], true, diceStyle == i);
+    menu.setLookAndFeel (&getLookAndFeel()); // the plugin's menu style (menus use the default look otherwise)
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&dice),
                         [safe = juce::Component::SafePointer<PatternView> (this)] (int result)
                         {

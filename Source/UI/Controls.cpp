@@ -190,7 +190,7 @@ void Knob::mouseDown (const juce::MouseEvent& e)
     lastDragPos = e.position;
     dragging = false;
     residual = 0.0;
-    detentPull = 0.0;
+    rawValid = false;
     if (onGestureStart) onGestureStart();
     juce::Slider::mouseDown (e); // starts the host gesture
 }
@@ -212,10 +212,55 @@ void Knob::mouseDrag (const juce::MouseEvent& e)
     // Stepped knobs need more travel per step: each step clicks in instead of sliding past.
     const auto steps = hasDetents() ? (getMaximum() - getMinimum()) / getInterval() : 0.0;
     const auto pixelsForFullRange = e.mods.isShiftDown() ? 1200.0 : juce::jlimit (220.0, 480.0, steps * 8.0);
-    // The default and the marks are a light detent: only a slow drag clicks in, ~4 px pull it
-    // off again; a quick turn goes straight past (Shift: never).
-    const auto slow = std::abs (delta) < 3.0f;
-    nudge (delta / pixelsForFullRange, e.mods.isShiftDown() || ! slow ? 0.0 : 4.0 / pixelsForFullRange);
+
+    // The default and the marks click in the same way at any speed: the knob rests on one
+    // for 8 px of travel, then goes on exactly where the mouse is (no jump, nothing lost).
+    // Shift: no detents (fine adjustment).
+    const auto zoneNow = e.mods.isShiftDown() ? 0.0 : 8.0 / pixelsForFullRange;
+    if (! rawValid || zoneNow != zone)
+    {
+        zone = zoneNow;
+        detents.clear();
+        for (const auto v : magneticValues())
+            if (const auto p = valueToProportionOfLength (v); p > 1.0e-4 && p < 1.0 - 1.0e-4)
+                detents.push_back (p);
+        std::sort (detents.begin(), detents.end());
+        detents.erase (std::unique (detents.begin(), detents.end(), [] (double a, double b) { return std::abs (a - b) < 1.0e-6; }), detents.end());
+        rawPosition = rawFor (valueToProportionOfLength (getValue()), detents, zone);
+        rawValid = true;
+    }
+    rawPosition = juce::jlimit (0.0, 1.0 + zone * (double) detents.size(), rawPosition + delta / pixelsForFullRange);
+    setValue (proportionOfLengthToValue (juce::jlimit (0.0, 1.0, knobFor (rawPosition, detents, zone))), juce::sendNotificationSync);
+}
+
+double Knob::knobFor (double raw, const std::vector<double>& detents, double zone)
+{
+    // Each detent takes `zone` of travel in which the knob stays on it.
+    auto offset = 0.0;
+    for (const auto p : detents)
+    {
+        if (raw < p + offset)
+            return raw - offset;
+        if (raw <= p + offset + zone)
+            return p;
+        offset += zone;
+    }
+    return raw - offset;
+}
+
+double Knob::rawFor (double proportion, const std::vector<double>& detents, double zone)
+{
+    // Resting on a detent: the middle of its zone (half the zone pulls it off either way).
+    auto offset = 0.0;
+    for (const auto p : detents)
+    {
+        if (std::abs (proportion - p) < 1.0e-6)
+            return p + offset + zone * 0.5;
+        if (proportion < p)
+            break;
+        offset += zone;
+    }
+    return proportion + offset;
 }
 
 void Knob::mouseUp (const juce::MouseEvent& e)
@@ -229,43 +274,11 @@ void Knob::mouseUp (const juce::MouseEvent& e)
     repaint();
 }
 
-void Knob::nudge (double proportionDelta, double hold)
+void Knob::nudge (double proportionDelta)
 {
-    // Accumulate unsnapped so slow drags on stepped parameters (e.g. semitones) still move.
+    // Accumulate unsnapped so slow changes on stepped parameters (e.g. semitones) still move.
     const auto current = valueToProportionOfLength (getValue());
-    auto wanted = juce::jlimit (0.0, 1.0, current + proportionDelta + residual);
-
-    if (hold > 0.0)
-    {
-        for (const auto v : magneticValues())
-        {
-            const auto p = valueToProportionOfLength (v);
-            if (std::abs (current - p) < 1.0e-6)
-            {
-                // Resting on a detent: it holds until the drag has pulled far enough, then
-                // the knob goes on from there with what is left over.
-                detentPull += proportionDelta;
-                if (std::abs (detentPull) < hold)
-                {
-                    residual = 0.0;
-                    return;
-                }
-                wanted = juce::jlimit (0.0, 1.0, p + detentPull - std::copysign (hold, detentPull));
-                detentPull = 0.0;
-                residual = 0.0;
-                break;
-            }
-            if ((current < p && wanted >= p) || (current > p && wanted <= p))
-            {
-                wanted = p; // crossing a detent: it clicks in
-                detentPull = 0.0;
-                residual = 0.0;
-                setValue (v, juce::sendNotificationSync);
-                return;
-            }
-        }
-    }
-
+    const auto wanted = juce::jlimit (0.0, 1.0, current + proportionDelta + residual);
     setValue (proportionOfLengthToValue (wanted), juce::sendNotificationSync);
     residual = wanted - valueToProportionOfLength (getValue());
     if (std::abs (residual) > 0.2)
@@ -444,7 +457,17 @@ void IconButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
     g.setColour (on ? signal.withAlpha (0.75f) : (danger ? Colours::record : Colours::line));
     g.drawRoundedRectangle (r, Metrics::radiusSmall, danger ? 1.2f : Metrics::hairline);
 
-    const auto fg = ! enabled ? Colours::textFaint : (on ? signal : (danger ? Colours::record : (highlighted ? Colours::text : Colours::textDim)));
+    if (attention > 0.0f) // drawing the eye (e.g. an update is out): an accent glow that pulses
+    {
+        g.setColour (Colours::accent.withAlpha (0.18f * attention));
+        g.fillRoundedRectangle (r, Metrics::radiusSmall);
+        g.setColour (Colours::accent.withAlpha (attention));
+        g.drawRoundedRectangle (r, Metrics::radiusSmall, 1.4f);
+    }
+
+    auto fg = ! enabled ? Colours::textFaint : (on ? signal : (danger ? Colours::record : (highlighted ? Colours::text : Colours::textDim)));
+    if (attention > 0.0f && enabled)
+        fg = fg.interpolatedWith (Colours::accent, attention);
 
     // Symbols are drawn on a 16 x 16 grid, centred in the button.
     const auto box = r.withSizeKeepingCentre (14.0f, 14.0f).translated (0.0f, down ? 0.5f : 0.0f);
@@ -954,10 +977,16 @@ void ValueField::mouseDoubleClick (const juce::MouseEvent&)
     if (! isEnabled())
         return;
 
+    // The box exactly over the field (wider, its edges were cut off), the number where the
+    // field shows it (it jumped to the left), centred in the height.
     entry = std::make_unique<juce::TextEditor>();
-    entry->setFont (Fonts::get (large ? TextStyle::valueLarge : TextStyle::value));
+    const auto font = Fonts::get (large ? TextStyle::valueLarge : TextStyle::value);
+    entry->setFont (font);
+    entry->setJustification (justification.getOnlyHorizontalFlags() | juce::Justification::verticallyCentred);
+    entry->setBorder ({});
+    entry->setIndents (3, juce::jmax (0, juce::roundToInt ((getHeight() - font.getHeight()) * 0.5f)));
     entry->setText (hasValue ? juce::String (value, decimals) : juce::String(), false);
-    entry->setBounds (getLocalBounds().expanded (2, 0));
+    entry->setBounds (getLocalBounds());
     entry->setSelectAllWhenFocused (true);
     entry->setInputRestrictions (8, "0123456789.");
     addAndMakeVisible (*entry);

@@ -1,5 +1,6 @@
 #include "GrainView.h"
 #include "ScreenStyle.h"
+#include <cstring>
 
 namespace kerf::ui
 {
@@ -329,24 +330,36 @@ void GrainView::updateVectorscope()
 void GrainView::updateSpectrogram()
 {
     const auto w = spectroImage.getWidth(), h = spectroImage.getHeight();
-    if (spectroAccent != signal()) // a new theme: start the history afresh in its colour
+    if (spectroLevels.size() != (size_t) (w * h))
+        spectroLevels.assign ((size_t) (w * h), 0);
+    if (spectroAccent != signal() || spectroBack != screen::bg()) // a new theme: the history goes on, in its colours
     {
         spectroAccent = signal();
-        juce::Graphics g (spectroImage);
-        g.fillAll (screen::bg());
+        spectroBack = screen::bg();
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x)
+                spectroImage.setPixelAt (x, y, spectroColour ((float) spectroLevels[(size_t) (y * w + x)] / 255.0f));
     }
     spectroImage.moveImageSection (0, 0, 1, 0, w - 1, h); // scroll left by one column
+    for (int y = 0; y < h; ++y)
+        std::memmove (&spectroLevels[(size_t) (y * w)], &spectroLevels[(size_t) (y * w + 1)], (size_t) (w - 1));
 
     const auto& bands = processor.getSpectrum().getBands();
     for (int y = 0; y < h; ++y)
     {
         const auto band = juce::jlimit (0, SpectrumAnalyzer::numBands - 1, (h - 1 - y) * SpectrumAnalyzer::numBands / h);
         const auto intensity = std::pow (juce::jlimit (0.0f, 1.0f, juce::jmap (bands[(size_t) band], -78.0f, -6.0f, 0.0f, 1.0f)), 1.6f);
-        auto colour = screen::bg().interpolatedWith (signal(), intensity);
-        if (intensity > 0.82f)
-            colour = screen::heat (colour, (intensity - 0.82f) * 2.5f);
-        spectroImage.setPixelAt (w - 1, y, colour);
+        spectroLevels[(size_t) (y * w + w - 1)] = (uint8_t) juce::roundToInt (intensity * 255.0f);
+        spectroImage.setPixelAt (w - 1, y, spectroColour (intensity));
     }
+}
+
+juce::Colour GrainView::spectroColour (float intensity)
+{
+    auto colour = screen::bg().interpolatedWith (signal(), intensity);
+    if (intensity > 0.82f)
+        colour = screen::heat (colour, (intensity - 0.82f) * 2.5f);
+    return colour;
 }
 
 //==============================================================================
@@ -454,8 +467,10 @@ void GrainView::buildSky (juce::Rectangle<int> size)
         const juce::Point<float> p (w * (0.05f + 0.9f * rng.nextFloat()), h * (0.1f + 0.8f * rng.nextFloat()));
         const auto r = (0.12f + 0.28f * rng.nextFloat()) * std::min (w, h);
         const auto c = (k % 3 == 0 ? second : signal()).withMultipliedSaturation (0.8f);
+        juce::Graphics::ScopedSaveState flat (g);
+        g.addTransform (juce::AffineTransform::scale (1.0f, 0.65f, p.x, p.y));
         g.setGradientFill (juce::ColourGradient (c.withAlpha ((0.05f + 0.06f * rng.nextFloat()) * cloud), p, c.withAlpha (0.0f), p.translated (r, 0.0f), true));
-        g.fillEllipse (juce::Rectangle<float> (r * 2.0f, r * 1.3f).withCentre (p));
+        g.fillEllipse (juce::Rectangle<float> (r * 2.0f, r * 2.0f).withCentre (p));
     }
     // Faint dust far away.
     for (int k = 0; k < 420; ++k)
@@ -473,7 +488,7 @@ void GrainView::buildSky (juce::Rectangle<int> size)
 void GrainView::paintEngine (juce::Graphics& g, juce::Rectangle<float> screen)
 {
     paintScreen (g, screen, "GRANULIZER");
-    const auto boost = lightTheme() ? 1.7f : 1.0f;
+    const auto boost = lightTheme() ? 1.3f : 1.0f;
     auto A = [boost] (float a) { return std::min (1.0f, a * boost); };
     auto param = [this] (const char* id) { return processor.getParameters().getRawParameterValue (id)->load(); };
     const auto frozen = param (Params::grainFreeze) > 0.5f;
@@ -489,7 +504,7 @@ void GrainView::paintEngine (juce::Graphics& g, juce::Rectangle<float> screen)
     g.drawImageAt (skyImage, (int) inner.getX(), (int) inner.getY());
 
     const auto m = screen.reduced (16.0f, 14.0f).withTrimmedTop (14.0f);
-    const juce::Point<float> c (m.getCentreX(), m.getCentreY() + m.getHeight() * 0.08f);
+    const auto c = screen.getCentre(); // the core in the middle
     const auto tilt = 0.36f;                                                   // the disc seen from a little above
     const auto R = std::min (m.getWidth() * 0.34f, m.getHeight() * 0.95f);    // the ring: the chop, start to end
     const auto lift = m.getHeight() * 0.011f;                                  // pixels of height per semitone
@@ -515,7 +530,7 @@ void GrainView::paintEngine (juce::Graphics& g, juce::Rectangle<float> screen)
             g.fillRect (juce::Rectangle<float> (s.size * 4.0f, 0.6f).withCentre (p));
             g.fillRect (juce::Rectangle<float> (0.6f, s.size * 4.0f).withCentre (p));
         }
-        if (glow > 0.25f) // loud: the stars streak outwards (warp)
+        if (glow > 0.25f && ! light) // loud: the stars streak outwards (warp; at night)
         {
             const auto d = (p - c) / std::max (1.0f, p.getDistanceFrom (c));
             g.setColour (spaceInk().withAlpha (A (0.35f * (glow - 0.25f) * twinkle)));
@@ -570,8 +585,11 @@ void GrainView::paintEngine (juce::Graphics& g, juce::Rectangle<float> screen)
                 break;
             const auto flare = juce::jlimit (0.0f, 1.0f, r * 3.5f);
             const auto base = at (u, R * 0.985f, 0.0f);
-            g.setColour (tone.withAlpha (A ((back ? 0.10f : 0.18f) * (0.4f + flare))));
-            g.drawLine ({ base, o }, 3.0f);
+            if (! light) // the rays' soft width: at night (in white mode it was a dense hatching)
+            {
+                g.setColour (tone.withAlpha ((back ? 0.10f : 0.18f) * (0.4f + flare)));
+                g.drawLine ({ base, o }, 3.0f);
+            }
             g.setColour (tone.brighter (0.3f).withAlpha (A ((back ? 0.3f : 0.6f) * (0.3f + 0.7f * flare))));
             g.drawLine ({ base, o }, 0.9f);
         }
@@ -698,8 +716,9 @@ void GrainView::paintEngine (juce::Graphics& g, juce::Rectangle<float> screen)
             halo.addEllipse (juce::Rectangle<float> (ring * 2.0f, ring * 2.0f).withCentre (c));
             glowStroke (g, halo, tone.brighter (0.5f).withAlpha (A (0.45f + 0.4f * glow)), 1.1f, 0.6f + 0.5f * glow);
         }
-        g.setGradientFill (juce::ColourGradient (tone.withAlpha (A (0.55f + 0.3f * glow)), c, tone.withAlpha (A (0.0f)), c.translated (r * 1.8f, 0.0f), true));
-        g.fillEllipse (juce::Rectangle<float> (r * 3.6f, r * 3.6f * 0.8f).withCentre (c));
+        g.setGradientFill (juce::ColourGradient (tone.withAlpha (light ? 0.22f + 0.2f * glow : 0.55f + 0.3f * glow), c, tone.withAlpha (0.0f),
+                                                 c.translated (r * (light ? 1.3f : 1.8f), 0.0f), true));
+        g.fillEllipse (juce::Rectangle<float> (r * 3.6f, r * 3.6f).withCentre (c));
         for (int arm = 0; arm < 3; ++arm)
         {
             juce::Path spiral;
@@ -823,21 +842,25 @@ void GrainView::paintEngine (juce::Graphics& g, juce::Rectangle<float> screen)
     }
 
     // A lens flare over the core: a long thin streak, a short upright one, and soft ghosts
-    // on a line out of the core.
+    // on a line out of the core. At night only (on white it is just a smudge over the core).
+    if (! light)
     {
         const auto strength = 0.25f + 0.6f * glow;
         const auto half = R * (0.9f + 0.9f * glow);
-        juce::ColourGradient streak (glint.withAlpha (A (0.0f)), c.x - half, c.y, glint.withAlpha (A (0.0f)), c.x + half, c.y, false);
-        streak.addColour (0.5, glint.interpolatedWith (tone, 0.2f).withAlpha (A (0.75f * strength)));
-        g.setGradientFill (streak);
-        g.fillRect (juce::Rectangle<float> (half * 2.0f, 1.4f).withCentre (c));
-        streak.multiplyOpacity (0.3f);
-        g.setGradientFill (streak);
-        g.fillRect (juce::Rectangle<float> (half * 2.0f, 6.0f).withCentre (c));
-        juce::ColourGradient upright (glint.withAlpha (A (0.0f)), c.x, c.y - half * 0.3f, glint.withAlpha (A (0.0f)), c.x, c.y + half * 0.3f, false);
-        upright.addColour (0.5, glint.withAlpha (A (0.6f * strength)));
-        g.setGradientFill (upright);
-        g.fillRect (juce::Rectangle<float> (1.2f, half * 0.6f).withCentre (c));
+        auto softStreak = [&] (float length, float thickness, float alpha, juce::Colour colour)
+        {
+            // A round glow squashed into a streak: it fades out along it and across it.
+            juce::Graphics::ScopedSaveState squash (g);
+            // `length` across, `thickness` up and down (half sizes).
+            const auto radius = std::max (length, thickness);
+            g.addTransform (juce::AffineTransform::scale (length / radius, thickness / radius, c.x, c.y));
+            g.setGradientFill (juce::ColourGradient (colour.withAlpha (A (alpha)), c, colour.withAlpha (0.0f), c.translated (radius, 0.0f), true));
+            g.fillEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (c));
+        };
+        const auto flare = glint.interpolatedWith (tone, 0.2f);
+        softStreak (half, 3.0f, 0.75f * strength, flare);         // the thin bright line
+        softStreak (half * 0.5f, 5.0f, 0.12f * strength, flare);  // its soft glow
+        softStreak (2.5f, half * 0.3f, 0.6f * strength, glint);   // the short upright one
         const juce::Point<float> direction (0.93f, -0.36f);
         static constexpr float along[] = { 0.55f, 0.8f, 1.25f, -0.7f }, sizes[] = { 9.0f, 20.0f, 30.0f, 14.0f };
         for (int k = 0; k < 4; ++k)

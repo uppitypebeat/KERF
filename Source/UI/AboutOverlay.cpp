@@ -16,8 +16,12 @@ namespace
     constexpr float tilt = -0.2f;    // the disc leans a little
     constexpr float flatten = 0.36f; // and is seen from slightly above
 
-    // Always deep space, also in the white themes: the light comes from the galaxy.
-    const juce::Colour space { 0xff04050a }, ink { 0xfff2ede6 }, inkDim { 0xff9c968f }, inkFaint { 0xff5d5953 };
+    // Deep space at night; in the white themes white paper, the galaxy in strong colours and
+    // the words in dark ink (light on light was pale).
+    juce::Colour space()    { return lightTheme() ? Colours::background : juce::Colour (0xff04050a); }
+    juce::Colour ink()      { return lightTheme() ? Colours::text : juce::Colour (0xfff2ede6); }
+    juce::Colour inkDim()   { return lightTheme() ? Colours::textDim : juce::Colour (0xff9c968f); }
+    juce::Colour inkFaint() { return lightTheme() ? Colours::textFaint : juce::Colour (0xff5d5953); }
 
     float distanceToSegment (juce::Point<float> p, juce::Point<float> a, juce::Point<float> b, float& side)
     {
@@ -82,11 +86,11 @@ AboutOverlay::~AboutOverlay()
 
 void AboutOverlay::show()
 {
-    licences.setColour (juce::TextEditor::backgroundColourId, space.withAlpha (0.92f));
-    licences.setColour (juce::TextEditor::textColourId, inkDim);
+    licences.setColour (juce::TextEditor::backgroundColourId, space().withAlpha (0.92f));
+    licences.setColour (juce::TextEditor::textColourId, inkDim());
     licences.setColour (juce::TextEditor::outlineColourId, Colours::accent.withAlpha (0.35f));
     licences.setColour (juce::TextEditor::focusedOutlineColourId, Colours::accent.withAlpha (0.35f));
-    licences.applyColourToAllText (inkDim);
+    licences.applyColourToAllText (inkDim());
     licences.setCaretPosition (0);
     licences.setVisible (false);
     licencesButton.setToggleState (false, juce::dontSendNotification);
@@ -422,9 +426,13 @@ void AboutOverlay::paint (juce::Graphics& g)
     const auto c = galaxyCentre();
     const auto fade = Motion::easeOut (appear);
     const auto accent = Colours::accent, glow = nebulaGlow();
+    // White mode: the hot core in the deep accent (white would vanish), the colours stronger.
+    const auto light = lightTheme();
+    const auto hot = light ? accent.darker (0.45f) : ink();
+    const auto strong = light ? 1.6f : 1.0f;
 
     // Deep space, lit from the galaxy's core.
-    g.setColour (space);
+    g.setColour (space());
     g.fillRect (bounds);
     {
         juce::ColourGradient light (accent.withAlpha (0.22f * fade), c.x, c.y, accent.withAlpha (0.0f), c.x + bounds.getWidth() * 0.55f, c.y, true);
@@ -440,7 +448,7 @@ void AboutOverlay::paint (juce::Graphics& g)
     for (const auto& d : dust)
     {
         const auto a = (0.15f + 0.45f * d.depth) * (0.6f + 0.4f * std::sin (d.twinkle)) * fade;
-        g.setColour (ink.withAlpha (a));
+        g.setColour (ink().withAlpha (a));
         g.fillRect (juce::Rectangle<float> (d.size, d.size).withCentre ({ d.x * bounds.getWidth(), d.y * bounds.getHeight() }));
     }
 
@@ -448,7 +456,7 @@ void AboutOverlay::paint (juce::Graphics& g)
     for (const auto& cl : clouds)
     {
         const auto colour = accent.interpolatedWith (glow, cl.hue * 0.55f);
-        const auto a = (0.07f + 0.04f * std::sin (cl.twinkle)) * fade;
+        const auto a = (0.07f + 0.04f * std::sin (cl.twinkle)) * fade * strong;
         const auto r = cl.size;
         g.setGradientFill (juce::ColourGradient (colour.withAlpha (a), cl.x, cl.y, colour.withAlpha (0.0f), cl.x + r, cl.y, true));
         g.fillEllipse (juce::Rectangle<float> (r * 2.0f, r * 2.0f * 0.7f).withCentre ({ cl.x, cl.y }));
@@ -459,8 +467,8 @@ void AboutOverlay::paint (juce::Graphics& g)
     {
         const auto twinkle = 0.65f + 0.35f * std::sin (s.twinkle);
         const auto moved = std::min (1.0f, std::sqrt (s.dx * s.dx + s.dy * s.dy) / 40.0f); // flung stars burn brighter
-        const auto colour = accent.interpolatedWith (glow, s.hue * 0.65f).interpolatedWith (ink, std::pow (1.0f - s.radius, 4.0f) * 0.85f);
-        const auto alpha = juce::jlimit (0.0f, 1.0f, ((0.38f + 0.62f * s.depth) * twinkle + 0.5f * moved) * fade);
+        const auto colour = accent.interpolatedWith (glow, s.hue * 0.65f).interpolatedWith (hot, std::pow (1.0f - s.radius, 4.0f) * 0.85f);
+        const auto alpha = juce::jlimit (0.0f, 1.0f, ((0.38f + 0.62f * s.depth) * twinkle + 0.5f * moved) * fade * (light ? 1.25f : 1.0f));
         const auto size = s.size * (1.0f + 0.6f * moved);
         g.setColour (colour.withAlpha (alpha));
         if (size < 1.4f)
@@ -471,7 +479,7 @@ void AboutOverlay::paint (juce::Graphics& g)
 
     // The core: a white-hot bloom behind the blade.
     {
-        juce::ColourGradient core (ink.withAlpha (0.28f * fade), c.x, c.y, accent.withAlpha (0.0f), c.x + 190.0f, c.y, true);
+        juce::ColourGradient core (hot.withAlpha (0.28f * fade), c.x, c.y, accent.withAlpha (0.0f), c.x + 190.0f, c.y, true);
         core.addColour (0.35, accent.withAlpha (0.16f * fade));
         g.setGradientFill (core);
         g.fillEllipse (juce::Rectangle<float> (380.0f, 380.0f).withCentre (c));
@@ -482,12 +490,12 @@ void AboutOverlay::paint (juce::Graphics& g)
         const auto turn = juce::AffineTransform::rotation (bladeAngle, c.x, c.y);
         auto shape = blade;
         shape.applyTransform (turn);
-        g.setColour (space.withAlpha (0.72f * fade));
+        g.setColour (space().withAlpha (0.72f * fade));
         g.fillPath (shape);
         const auto heat = juce::jlimit (0.0f, 1.0f, (spin - 0.35f) / 6.0f);
         for (const auto [width, alpha] : { std::pair { 9.0f, 0.06f }, { 4.0f, 0.14f }, { 1.4f, 0.75f } })
         {
-            g.setColour (accent.interpolatedWith (ink, heat * 0.5f).withAlpha (alpha * (0.7f + 0.3f * heat) * fade));
+            g.setColour (accent.interpolatedWith (ink(), heat * 0.5f).withAlpha (alpha * (0.7f + 0.3f * heat) * fade));
             g.strokePath (shape, juce::PathStrokeType (width, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
     }
@@ -507,9 +515,9 @@ void AboutOverlay::paint (juce::Graphics& g)
             g.setColour (accent.withAlpha (alpha * life));
             g.strokePath (line, juce::PathStrokeType (width, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
-        g.setColour (ink.withAlpha (0.9f * life));
+        g.setColour (ink().withAlpha (0.9f * life));
         g.strokePath (line, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-        g.setColour (space.withAlpha (0.85f * life)); // the kerf itself: the gap the cut leaves
+        g.setColour (space().withAlpha (0.85f * life)); // the kerf itself: the gap the cut leaves
         g.strokePath (line, juce::PathStrokeType (0.7f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 
@@ -520,7 +528,7 @@ void AboutOverlay::paint (juce::Graphics& g)
         const auto a = 1.0f - ring.age;
         g.setColour (accent.withAlpha (0.12f * a));
         g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (ring.centre), 14.0f * a);
-        g.setColour (ink.withAlpha (0.55f * a));
+        g.setColour (ink().withAlpha (0.55f * a));
         g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (ring.centre), 1.4f);
     }
 
@@ -528,7 +536,7 @@ void AboutOverlay::paint (juce::Graphics& g)
     for (const auto& s : sparks)
     {
         const auto t = s.life / s.maxLife;
-        g.setColour (ink.interpolatedWith (accent, 1.0f - t).withAlpha (t));
+        g.setColour (ink().interpolatedWith (accent, 1.0f - t).withAlpha (t));
         g.drawLine ({ s.position, s.position - s.velocity * 0.018f }, s.size);
     }
 
@@ -538,7 +546,7 @@ void AboutOverlay::paint (juce::Graphics& g)
         g.setColour (accent.withAlpha (alpha * fade));
         g.strokePath (wordmark, juce::PathStrokeType (width, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
-    g.setColour (ink.withAlpha (fade));
+    g.setColour (ink().withAlpha (fade));
     g.fillPath (wordmark);
 
     // Under it: what it is, the version; at the bottom the credits.
@@ -549,19 +557,19 @@ void AboutOverlay::paint (juce::Graphics& g)
         g.drawText (text, area, juce::Justification::centred, false);
     };
     line (juce::String::fromUTF8 ("SAMPLE CHOPPING  \xc2\xb7  GRANULAR  \xc2\xb7  EFFECTS"), { 0.0f, c.y + 56.0f, bounds.getWidth(), 16.0f },
-          Fonts::sans (11.5f, 500).withExtraKerningFactor (0.32f), inkDim);
-    line ("VERSION " + versionString(), { 0.0f, c.y + 76.0f, bounds.getWidth(), 14.0f }, Fonts::mono (10.5f, true), accent.interpolatedWith (ink, 0.35f));
+          Fonts::sans (11.5f, 500).withExtraKerningFactor (0.32f), inkDim());
+    line ("VERSION " + versionString(), { 0.0f, c.y + 76.0f, bounds.getWidth(), 14.0f }, Fonts::mono (10.5f, true), accent.interpolatedWith (ink(), 0.35f));
 
     const auto creditsY = bounds.getBottom() - 112.0f;
-    line ("CREATED & DESIGNED BY", { 0.0f, creditsY, bounds.getWidth(), 14.0f }, Fonts::sans (10.0f, 500).withExtraKerningFactor (0.3f), inkFaint);
-    line ("Julien Upmeier", { 0.0f, creditsY + 16.0f, bounds.getWidth(), 22.0f }, Fonts::sans (17.0f, 600), ink);
+    line ("CREATED & DESIGNED BY", { 0.0f, creditsY, bounds.getWidth(), 14.0f }, Fonts::sans (10.0f, 500).withExtraKerningFactor (0.3f), inkFaint());
+    line ("Julien Upmeier", { 0.0f, creditsY + 16.0f, bounds.getWidth(), 22.0f }, Fonts::sans (17.0f, 600), ink());
     line (juce::String::fromUTF8 ("\xc2\xa9 2026 Julien Upmeier. All rights reserved."), { 0.0f, creditsY + 40.0f, bounds.getWidth(), 14.0f },
-          Fonts::sans (10.5f, 400), inkDim);
+          Fonts::sans (10.5f, 400), inkDim());
 
     // Behind the licence text.
     if (licences.isVisible())
     {
-        g.setColour (space.withAlpha (0.6f));
+        g.setColour (space().withAlpha (0.6f));
         g.fillRect (licences.getBounds().toFloat().expanded (12.0f));
     }
 }

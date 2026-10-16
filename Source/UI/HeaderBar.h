@@ -47,6 +47,7 @@ private:
     void showModeMenu();
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void animationTick (double dt) override;
+    double updateBlink = 0.0; // the menu button pulses while an update is out and the menu not yet opened
     void updateFromProcessor();
 
     KerfAudioProcessor& processor;

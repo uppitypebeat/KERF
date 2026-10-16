@@ -87,6 +87,13 @@ public:
     void focusGained (FocusChangeType) override { repaint(); }
     void focusLost (FocusChangeType) override { repaint(); }
 
+    /** A drag's detents: the mouse travel ("raw", in proportions of the range) has a rest
+        zone of `zone` at every detent (ascending): inside it the knob stays on the detent,
+        past it the knob goes on with no jump. `rawFor`: where a knob position is in that
+        travel (on a detent: the middle of its zone). */
+    static double knobFor (double raw, const std::vector<double>& detents, double zone);
+    static double rawFor (double proportion, const std::vector<double>& detents, double zone);
+
     static constexpr int preferredWidth (Size s)  { return s == Size::hero ? 84 : (s == Size::large ? 56 : 52); }
     static constexpr int preferredHeight (Size s) { return s == Size::hero ? 104 : (s == Size::large ? 84 : 70); }
 
@@ -94,8 +101,7 @@ private:
     void animationTick (double dt) override;
     juce::Rectangle<float> discArea() const;
     juce::Rectangle<float> readoutArea() const;
-    /** `hold`: drag travel (of the full range) a magnetic detent keeps the knob for; 0 = none. */
-    void nudge (double proportionDelta, double hold = 0.0);
+    void nudge (double proportionDelta); // the wheel, the arrow keys
     bool hasDetents() const;  // semitone / cent knobs: they click into each step
     double notchStep() const; // the marked steps in the ring (every octave on a pitch knob)
     std::vector<double> magneticValues() const; // where a drag clicks in: the default and the marks
@@ -114,7 +120,10 @@ private:
     bool dragging = false;
     juce::Point<float> lastDragPos;
     double residual = 0.0; // unsnapped drag remainder for stepped parameters
-    double detentPull = 0.0; // drag travel spent pulling the knob off the detent it rests on
+    double rawPosition = 0.0;      // the drag in mouse travel (see knobFor)
+    double zone = 0.0;             // a detent's rest zone in that travel (Shift: none)
+    bool rawValid = false;         // set up on the drag's first move (and again when Shift changes)
+    std::vector<double> detents;   // the detents' positions (0..1), ascending, the ends left out
     std::unique_ptr<juce::TextEditor> entry;
 };
 
@@ -150,6 +159,7 @@ public:
     void paintButton (juce::Graphics&, bool highlighted, bool down) override;
     void setIconWhenOn (Icon i) { onIcon = i; hasOnIcon = true; repaint(); } // e.g. play -> stop while playing
     void setDangerOnHover (bool b) { dangerOnHover = b; repaint(); } // red under the mouse (a destructive action)
+    void setAttention (float a) { if (a != attention) { attention = a; repaint(); } } // 0..1: an accent glow (e.g. an update is out)
     std::function<void()> onRightClick; // e.g. a menu of options
     // Only the left button clicks (a right-click does nothing, or opens `onRightClick`).
     void mouseDown (const juce::MouseEvent& e) override
@@ -165,6 +175,7 @@ private:
     Icon onIcon = Icon::stop;
     bool hasOnIcon = false;
     bool dangerOnHover = false;
+    float attention = 0.0f;
 };
 
 /** A row of mutually exclusive text options (e.g. STR | TRI | DUP | DOT). */

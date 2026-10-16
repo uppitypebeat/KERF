@@ -27,7 +27,8 @@ symbol, top right.
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y. Covers every knob, button and menu, chop edits, pads, pattern, presets and BPM |
 | Theme | Click the **KERF** logo for the next theme: Nebula (the default), Aurora, Ember (night skies), Daylight, Glacier, Bloom (white mode) |
 | Right-click a chop | Play mode, reverse, choke group, MIDI note, merge, delete |
-| Knobs | Drag (Shift: fine) or use the wheel. Double-click the value to type it; double-click the knob for its default |
+| Knobs | Drag (Shift: fine) or use the wheel. A knob rests briefly on its default and its marks as you drag past (Shift: it doesn't). Double-click the value to type it; double-click the knob for its default |
+| Updates | KERF checks for a new version when it opens. If there is one, the menu button (top right) pulses until you open the menu, and "Check for updates" has a dot; DOWNLOAD there fetches the installer |
 
 KERF's own playback (PLAY, the pattern) stops when the DAW starts playing.
 

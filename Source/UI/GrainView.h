@@ -85,7 +85,9 @@ private:
     // Candy
     std::deque<std::vector<juce::Point<float>>> vectorTraces; // newest last; normalised -1..1 (side, mid)
     juce::Image spectroImage { juce::Image::RGB, 180, 96, true, juce::SoftwareImageType() };
-    juce::Colour spectroAccent; // the theme colour the history is drawn in
+    juce::Colour spectroAccent, spectroBack; // the theme colours the history is drawn in
+    std::vector<uint8_t> spectroLevels;       // its loudness, pixel by pixel (a new theme recolours it)
+    static juce::Colour spectroColour (float intensity);
     float correlation = 0.0f;
     float vectorGain = 4.0f;   // auto-gain so the trace fills the scope
     int freshFrames = 0;       // frames that arrived since the last frame
