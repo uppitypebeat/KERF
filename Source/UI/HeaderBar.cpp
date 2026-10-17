@@ -60,19 +60,19 @@ HeaderBar::HeaderBar (KerfAudioProcessor& p, AnimationClock& c)
     addAndMakeVisible (bpmField);
     bpmField.setLarge (true); // the same size as the KEY values
     bpmField.setDragStep (1.0); // drag in whole BPM; Shift for tenths
-    bpmField.setTooltip ("Sample tempo. Drag or mouse wheel: whole BPM (Shift: tenths); double-click to type it; right-click to double or halve it.");
+    bpmField.setTooltip ("Tempo of the sample. Drag, scroll or double-click to type. Right-click: double or half");
     bpmField.onChange = [this] (double v) { processor.setSourceBpm (v, true); };
 
     addChildComponent (autoButton); // shows after a manual BPM
-    autoButton.setTooltip ("AUTO: back to the detected tempo");
+    autoButton.setTooltip ("Back to the detected tempo");
     autoButton.onClick = [this] { processor.resetTempo(); };
     addChildComponent (keyAutoButton); // shows after a key change
-    keyAutoButton.setTooltip ("AUTO: back to the detected key (no transposition, the detected mode)");
+    keyAutoButton.setTooltip ("Back to the detected key");
     keyAutoButton.onClick = [this] { processor.resetKey(); };
 
     // Tempo is ambiguous by a factor of two: one click to fix a half / double reading.
     addAndMakeVisible (abToggle);
-    abToggle.setTooltip ("A / B: compare two versions of the sound. Switching keeps the current sound in its slot.");
+    abToggle.setTooltip ("Compare two versions of your sound");
     abToggle.onChange = [this] (int slot) { processor.switchAb (slot); if (onKeyboardBack) onKeyboardBack(); };
     previousPreset.setTooltip ("Previous preset");
     previousPreset.onClick = [this] { processor.stepPreset (-1); if (onKeyboardBack) onKeyboardBack(); };
@@ -96,13 +96,13 @@ HeaderBar::HeaderBar (KerfAudioProcessor& p, AnimationClock& c)
 
     for (auto* b : { &undoButton, &redoButton, &loadButton, &menuButton, &previousPreset, &nextPreset })
         addAndMakeVisible (b);
-    menuButton.setTooltip ("About KERF, the guide, updates");
+    menuButton.setTooltip ("Menu: about, guide, updates");
     menuButton.onClick = [this] { showMainMenu(); };
 
     undoButton.onClick = [this] { processor.getUndoManager().undo(); };
     redoButton.onClick = [this] { processor.getUndoManager().redo(); };
     loadButton.onClick = [this] { if (onLoad) onLoad(); };
-    loadButton.setTooltip ("LOAD: open an audio file (or drag one onto the waveform)");
+    loadButton.setTooltip ("Open an audio file");
 
     processor.addChangeListener (this);
     clock.add (this);

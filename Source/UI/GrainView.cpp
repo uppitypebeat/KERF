@@ -20,7 +20,7 @@ GrainView::GrainView (KerfAudioProcessor& p, AnimationClock& c) : processor (p),
 {
     clock.add (this);
     setInterceptsMouseClicks (false, false);
-    { juce::Graphics g (spectroImage); g.fillAll (screen::bg()); }
+    spectroImage.clear (spectroImage.getBounds()); // see-through, like OSC and VECTOR
 }
 
 GrainView::~GrainView()
@@ -356,7 +356,8 @@ void GrainView::updateSpectrogram()
 
 juce::Colour GrainView::spectroColour (float intensity)
 {
-    auto colour = screen::bg().interpolatedWith (signal(), intensity);
+    // The theme colour, as strong as the band is loud, over nothing (the screen shows through).
+    auto colour = signal().withAlpha (intensity);
     if (intensity > 0.82f)
         colour = screen::heat (colour, (intensity - 0.82f) * 2.5f);
     return colour;

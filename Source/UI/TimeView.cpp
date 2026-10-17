@@ -58,7 +58,7 @@ TimeView::TimeView (KerfAudioProcessor& p, AnimationClock& c) : processor (p), c
 {
     speedHistory.fill (1.0f);
     addAndMakeVisible (reset);
-    reset.setTooltip ("RESET: this slot back to its factory shape (CUSTOM: flat). Undoable.");
+    reset.setTooltip ("Back to the slot's original shape");
     reset.onClick = [this] { processor.resetTimeSlot (shownSlot); };
     clock.add (this);
 }
@@ -771,13 +771,16 @@ void TimeSlots::mouseDown (const juce::MouseEvent& e)
 
 void TimeSlots::clickSlot (int k)
 {
-    // This slot on (and shown). The active one again: its TIME and VOLUME curves back to the
-    // factory shape (it stays on); when there is nothing to reset: off.
+    // This slot on (and shown). The active one again: everything on the TIME page back to
+    // how it started - its TIME and VOLUME curves, MIX and the cycle length (it stays on).
     setTimeEditSlot (processor, k);
-    if (activeSlot (processor) == k && processor.isTimeSlotEdited (k))
-        processor.resetTimeSlot (k);
+    if (activeSlot (processor) == k)
+    {
+        processor.resetTimeSettings (k);
+        processor.setStatusMessage ("TIME reset  -  Ctrl+Z brings your settings back");
+    }
     else
-        processor.setParameterAsGesture (Params::timeSlot, activeSlot (processor) == k ? 0.0f : (float) (k + 1));
+        processor.setParameterAsGesture (Params::timeSlot, (float) (k + 1));
 }
 
 } // namespace kerf::ui

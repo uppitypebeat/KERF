@@ -84,7 +84,7 @@ private:
 
     // Candy
     std::deque<std::vector<juce::Point<float>>> vectorTraces; // newest last; normalised -1..1 (side, mid)
-    juce::Image spectroImage { juce::Image::RGB, 180, 96, true, juce::SoftwareImageType() };
+    juce::Image spectroImage { juce::Image::ARGB, 180, 96, true, juce::SoftwareImageType() }; // see-through: the screen shows behind it
     juce::Colour spectroAccent, spectroBack; // the theme colours the history is drawn in
     std::vector<uint8_t> spectroLevels;       // its loudness, pixel by pixel (a new theme recolours it)
     static juce::Colour spectroColour (float intensity);

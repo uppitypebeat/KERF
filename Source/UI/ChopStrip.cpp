@@ -18,7 +18,7 @@ ChopStrip::ChopStrip (KerfAudioProcessor& p, AnimationClock& c) : processor (p),
 
     addAndMakeVisible (rootField);
     rootField.formatter = [] (double v) { return noteName ((int) v); };
-    rootField.setTooltip ("Root note: the first chop's MIDI note. Drag to change, double-click to type a MIDI number.");
+    rootField.setTooltip ("MIDI note of the first chop. Drag, or double-click to type");
     rootField.onChange = [this] (double v)
     {
         processor.getUndoManager().beginNewTransaction ("Root note");
@@ -27,7 +27,7 @@ ChopStrip::ChopStrip (KerfAudioProcessor& p, AnimationClock& c) : processor (p),
     };
 
     addAndMakeVisible (remapButton);
-    remapButton.setTooltip ("Renumber chop notes in timeline order from the root note");
+    remapButton.setTooltip ("Give the chops notes in order, from the root note up");
     remapButton.onClick = [this]
     {
         processor.getUndoManager().beginNewTransaction ("Remap notes");
@@ -35,7 +35,7 @@ ChopStrip::ChopStrip (KerfAudioProcessor& p, AnimationClock& c) : processor (p),
     };
 
     addAndMakeVisible (kitButton);
-    kitButton.setTooltip ("KIT: save every chop as its own WAV file - as you hear it, or the dry slices");
+    kitButton.setTooltip ("Save every chop as its own WAV file");
     kitButton.onClick = [this] { showKitMenu(); };
 
     for (size_t i = 0; i < lastTriggers.size(); ++i) // only hits from now on animate
@@ -394,6 +394,13 @@ void ChopStrip::mouseDown (const juce::MouseEvent& e)
     dragPad = i; // a drag out of the plugin may follow
     dragStarted = dragRendering = false;
     dragReady = juce::File();
+
+    // Shift + click: every chop from the one shown to this one. No sound.
+    if (e.mods.isShiftDown() && ! e.mods.isCommandDown() && ! e.mods.isPopupMenu())
+    {
+        processor.selectChopRange (c.id);
+        return;
+    }
 
     // Ctrl (Cmd on a Mac) + click: the chop joins the selection or leaves it (on release; a
     // drag with Ctrl takes the chop out as MIDI instead). No sound.

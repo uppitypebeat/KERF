@@ -27,8 +27,8 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
     // --- SAMPLE ------------------------------------------------------------------
     bindChop (addKnob (start, 0.0), IDs::start, ChopBinding::Kind::start);
     bindChop (addKnob (length, 0.0), IDs::end, ChopBinding::Kind::length);
-    start.setTooltip ("Where the selected chop starts in the sample");
-    length.setTooltip ("Length of the selected chop");
+    start.setTooltip ("Where the chop starts");
+    length.setTooltip ("Length of the chop");
 
     fadeIn.setRange (0.0, ChopLimits::maxFadeInMs, 0.1);
     fadeIn.setSkewFactorFromMidPoint (60.0);
@@ -38,23 +38,23 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
     fadeOut.setSkewFactorFromMidPoint (120.0);
     fadeOut.textFromValueFunction = fadeIn.textFromValueFunction;
     bindChop (addKnob (fadeOut, 8.0), IDs::fadeOut);
-    fadeIn.setTooltip ("ATTACK: how fast the chop fades in");
-    fadeOut.setTooltip ("RELEASE: the fade-out after the key is released (GATE / LOOP) and at the end of the chop");
+    fadeIn.setTooltip ("Attack: how fast the chop fades in");
+    fadeOut.setTooltip ("Release: how fast the chop fades out");
 
     // --- ENVELOPE: decay to a sustain level (a short decay with no sustain = a tight hit)
     decay.setRange (ChopLimits::minDecayMs, ChopLimits::maxDecayMs, 0.1);
     decay.setSkewFactorFromMidPoint (300.0);
     decay.textFromValueFunction = [] (double v) { return v >= 1000.0 ? juce::String (v / 1000.0, 2) + " s" : juce::String (juce::roundToInt (v)) + " ms"; };
     bindChop (addKnob (decay, 300.0), IDs::decay);
-    decay.setTooltip ("DECAY: after the attack, the level falls to SUSTAIN in this time");
+    decay.setTooltip ("Decay: how fast it falls to the sustain level");
     sustain.setRange (0.0, 1.0, 0.0);
     sustain.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "%"; };
     bindChop (addKnob (sustain, 1.0), IDs::sustain);
-    sustain.setTooltip ("SUSTAIN: the level the chop holds after the decay. 100% = untouched, 0% = it stops after the decay (tight drums)");
+    sustain.setTooltip ("Sustain: the level it holds after the decay");
 
     // --- CHOKE: chops in the same group cut each other off (open / closed hi-hat)
     addAndMakeVisible (choke);
-    choke.setTooltip ("CHOKE: chops in the same group cut each other off, like an open hi-hat stopped by the closed one");
+    choke.setTooltip ("Chops in the same group cut each other off");
     choke.onChange = [this] (int group)
     {
         if (syncing) return;
@@ -63,7 +63,7 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
     };
 
     addAndMakeVisible (mode);
-    mode.setTooltip ("ONE: plays to the end  -  GATE: plays while held  -  LOOP: loops while held");
+    mode.setTooltip ("ONE plays to the end, GATE while held, LOOP loops while held");
     mode.onChange = [this] (int m)
     {
         if (syncing) return;
@@ -71,7 +71,7 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
     };
 
     addAndMakeVisible (reverse);
-    reverse.setTooltip ("Play the selected chop backwards");
+    reverse.setTooltip ("Play the chop backwards");
     reverse.onClick = [this]
     {
         if (syncing) return;
@@ -83,7 +83,7 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
     tune.textFromValueFunction = [] (double v) { const auto r = juce::roundToInt (v); return (r > 0 ? "+" : "") + juce::String (r) + " st"; };
     tune.valueFromTextFunction = [] (const juce::String& s) { return s.retainCharacters ("-0123456789.").getDoubleValue(); };
     bindChop (addKnob (tune, 0.0), IDs::pitch);
-    tune.setTooltip ("Selected chop pitch in semitones (adds to Global)");
+    tune.setTooltip ("Pitch of the chop in semitones");
 
     fine.setRange (ChopLimits::minFine, ChopLimits::maxFine, 1.0);
     fine.textFromValueFunction = [] (double v) { const auto r = juce::roundToInt (v); return (r > 0 ? "+" : "") + juce::String (r) + " ct"; };
@@ -91,14 +91,14 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
     bindChop (addKnob (fine, 0.0), IDs::fine);
 
     attachParam (addKnob (globalPitch, 0.0), Params::globalPitch);
-    globalPitch.setTooltip ("Transposes every chop (host-automatable)");
+    globalPitch.setTooltip ("Pitch of all chops in semitones");
 
     addAndMakeVisible (sync);
-    sync.setTooltip ("Follow the host tempo (needs the sample BPM). REPITCH: changes pitch too, like a turntable. STRETCH: keeps the pitch.");
+    sync.setTooltip ("Follow the DAW tempo");
     buttonAttachments.push_back (std::make_unique<juce::ButtonParameterAttachment> (*processor.getParameters().getParameter (Params::tempoSync), sync));
 
     addAndMakeVisible (stretchMode);
-    stretchMode.setTooltip ("REPITCH: speed and pitch move together (classic, zero latency)  -  STRETCH: tempo and pitch are independent (chops are rendered in the background)");
+    stretchMode.setTooltip ("REPITCH: the speed changes the pitch. STRETCH: the pitch stays");
     attachChoice (stretchMode, Params::stretchMode);
 
     // --- OUTPUT ------------------------------------------------------------------
@@ -119,55 +119,55 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
 
     // --- SPACE -------------------------------------------------------------------
     attachParam (addKnob (space, 0.0), Params::space);
-    space.setTooltip ("SPACE: stereo ping-pong echoes locked to the tempo. One knob: more = wider, longer, softer. 0 = off.");
+    space.setTooltip ("Stereo echoes in time with the tempo");
     spaceSend.setRange (0.0, 1.0, 0.0);
     spaceSend.textFromValueFunction = percentText;
     bindChop (addKnob (spaceSend, 1.0), IDs::spaceSend);
-    spaceSend.setTooltip ("How much of the selected chop goes into SPACE");
+    spaceSend.setTooltip ("How much of this chop goes into SPACE");
 
     // --- GRAIN -------------------------------------------------------------------
     attachParam (addKnob (grainMix, 0.0), Params::grainMix);
-    grainMix.setTooltip ("TEXTURE: blends the chop into a cloud of short grains (0 = off)");
+    grainMix.setTooltip ("Turns the sound into a cloud of grains");
     attachParam (addKnob (grainSize, 80.0), Params::grainSize);
     grainSize.setTooltip ("Length of each grain");
     attachParam (addKnob (grainDensity, 20.0), Params::grainDensity);
     attachParam (addKnob (grainSpray, 0.1), Params::grainSpray);
-    grainSpray.setTooltip ("Random scatter of where grains read inside the chop");
+    grainSpray.setTooltip ("How far the grains scatter");
     attachParam (addKnob (grainPitch, 0.0), Params::grainPitchRnd);
     attachParam (addKnob (grainScan, 1.0), Params::grainScan);
-    grainScan.setTooltip ("Read-head speed: 1 follows playback, 2 runs ahead, 0 stands still");
+    grainScan.setTooltip ("Speed of the read point (1 = normal, 0 = stands still)");
     attachParam (addKnob (grainPosition, 0.0), Params::grainPosition);
-    grainPosition.setTooltip ("Where in the chop grains read: an offset ahead of the read head (with Scan 0: a fixed point)");
+    grainPosition.setTooltip ("Where in the chop the grains read");
     attachParam (addKnob (grainSpread, 0.5), Params::grainSpread);
-    grainSpread.setTooltip ("Random stereo placement of grains");
+    grainSpread.setTooltip ("Spreads the grains across the stereo field");
     attachParam (addKnob (grainReverse, 0.0), Params::grainReverse);
     grainReverse.setTooltip ("Chance that a grain plays backwards");
     grainSend.setRange (0.0, 1.0, 0.0);
     grainSend.textFromValueFunction = percentText;
     bindChop (addKnob (grainSend, 1.0), IDs::grainSend);
-    grainSend.setTooltip ("How much TEXTURE applies to the selected chop");
+    grainSend.setTooltip ("How much grain texture this chop gets");
 
     attachParam (addKnob (grainDrift, 0.0), Params::grainDrift);
-    grainDrift.setTooltip ("DRIFT: the read position wanders slowly by itself, so the cloud keeps changing");
+    grainDrift.setTooltip ("Lets the read point wander by itself");
     attachParam (addKnob (grainShimmer, 0.0), Params::grainShimmer);
-    grainShimmer.setTooltip ("SHIMMER: some grains jump one or two octaves up, a bright sparkle over the cloud");
+    grainShimmer.setTooltip ("Adds grains an octave or two higher");
     attachParam (addKnob (grainPitchShift, 0.0), Params::grainPitch);
-    grainPitchShift.setTooltip ("Transposes every grain (semitones)");
-    grainPitch.setTooltip ("RANDOM: a random pitch per grain (+/- semitones). FREE / OCT / 5TH / CHORD below chooses which notes.");
+    grainPitchShift.setTooltip ("Pitch of all grains in semitones");
+    grainPitch.setTooltip ("Random pitch for each grain");
 
     attachParam (addKnob (grainShape, 0.25), Params::grainShape);
-    grainShape.setTooltip ("SHAPE: each grain's envelope. Left: hard (a flat top, gritty, glitchy). Middle: soft (a smooth cloud). Right: pluck (every grain struck like a string).");
+    grainShape.setTooltip ("Shape of each grain: hard, soft or plucked");
 
     addAndMakeVisible (grainScale);
     attachChoice (grainScale, Params::grainScale);
-    grainScale.setTooltip ("Which pitches RANDOM picks: FREE any, OCT octaves, 5TH fifths and octaves, CHORD the tones of a major or minor chord (follows the sample's key)");
+    grainScale.setTooltip ("Which notes the random pitch can use");
 
     addAndMakeVisible (grainFreeze);
-    grainFreeze.setTooltip ("FREEZE: the read head stops where it is; the cloud keeps playing that moment");
+    grainFreeze.setTooltip ("Freeze the cloud on the current moment");
     buttonAttachments.push_back (std::make_unique<juce::ButtonParameterAttachment> (*processor.getParameters().getParameter (Params::grainFreeze), grainFreeze));
 
     addAndMakeVisible (grainSync);
-    grainSync.setTooltip ("SYNC: DENSITY becomes a note value at the tempo (1 bar ... 1/64), every grain on time: a rhythmic stutter");
+    grainSync.setTooltip ("Grains in time with the tempo");
     buttonAttachments.push_back (std::make_unique<juce::ButtonParameterAttachment> (*processor.getParameters().getParameter (Params::grainSync), grainSync));
 
     // With SYNC, DENSITY reads as a note value.
@@ -185,22 +185,22 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
         refresh->sendInitialUpdate();
         choiceAttachments.push_back (std::move (refresh));
     }
-    grainDensity.setTooltip ("Grains per second (with SYNC: a note value at the tempo)");
+    grainDensity.setTooltip ("Grains per second");
 
 
     // --- DIRT / WOBBLE ------------------------------------------------------------
     attachParam (addKnob (dirt, 0.0), Params::drive);
-    dirt.setTooltip ("DIRT: distortion. WARM = tape saturation, FUZZ = hard clipping, CRUSH = bit crusher. 0 = off.");
+    dirt.setTooltip ("Distortion: WARM, FUZZ or CRUSH");
     addAndMakeVisible (dirtMode);
     attachChoice (dirtMode, Params::dirtMode);
 
     attachParam (addKnob (wobble, 0.0), Params::wobble);
-    wobble.setTooltip ("WOBBLE: TAPE = wow, flutter and drift like a worn tape; CHORUS = stereo chorus. 0 = off.");
+    wobble.setTooltip ("Tape wobble or chorus");
     addAndMakeVisible (wobbleMode);
     attachChoice (wobbleMode, Params::wobbleMode);
 
     attachParam (addKnob (pump, 0.0), Params::pump);
-    pump.setTooltip ("PUMP: the level dips on the beat and swells back, like sidechain compression. 1/4, 1/8 or 1/16, locked to the tempo. 0 = off.");
+    pump.setTooltip ("Ducks the sound in time with the tempo, like a sidechain");
     addAndMakeVisible (pumpMode);
     attachChoice (pumpMode, Params::pumpMode);
 
@@ -210,18 +210,18 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
     // --- TIME --------------------------------------------------------------------
     addAndMakeVisible (timeSlots);
     attachParam (addKnob (timeMix, 1.0), Params::timeMix);
-    timeMix.setTooltip ("MIX: how much of the TIME slot you hear (the rest plays on as it is)");
+    timeMix.setTooltip ("How much of the TIME effect you hear");
     addAndMakeVisible (timeLength);
     attachChoice (timeLength, Params::timeLength);
-    timeLength.setTooltip ("The length of one TIME cycle: the curves run over half a bar, a bar or two bars");
+    timeLength.setTooltip ("Length of one TIME cycle");
     addAndMakeVisible (timeBank);
-    timeBank.setTooltip ("Slot banks: A tempo and tape, B repeats and stutters, C gates and volume (CUSTOM is the last)");
+    timeBank.setTooltip ("Slot banks A, B and C");
     timeBank.onChange = [this] (int b) { timeSlots.setBank (b); };
     timeSlots.onBankChanged = [this] (int b) { timeBank.setSelected (b, juce::dontSendNotification); };
 
     // --- TONE --------------------------------------------------------------------
     attachParam (addKnob (filter, 0.0), Params::filter);
-    filter.setTooltip ("Left: low-pass  -  Centre: off  -  Right: high-pass");
+    filter.setTooltip ("Left: low-pass. Right: high-pass");
     attachParam (addKnob (resonance, 0.2), Params::resonance);
 
     //==========================================================================
@@ -947,7 +947,8 @@ void ControlPanel::rebindPads()
 //==============================================================================
 PageOffVeil::PageOffVeil (ControlPanel& p, AnimationClock& c) : panel (p), clock (c)
 {
-    setInterceptsMouseClicks (false, false);
+    // Shown only while a page is off: it takes the clicks, so nothing under it can be used.
+    setInterceptsMouseClicks (true, false);
     clock.add (this);
 }
 
@@ -1020,8 +1021,9 @@ void PageOffVeil::paint (juce::Graphics& g)
         g.fillRect (bounds);
     }
 
-    // In the middle of the view: what is off, and how to switch it on.
-    const auto view = viewArea.isEmpty() ? bounds : viewArea;
+    // In the middle of the page (its view and its controls - the same place on every page):
+    // what is off, and how to switch it on.
+    const auto view = bounds;
     const auto title = PageTabs::pageName (page) + " IS OFF";
     const auto hint = juce::String ("Double-click its tab to switch it on");
     const auto w = std::max (textWidth (title, TextStyle::sectionLabel), textWidth (hint, TextStyle::micro)) + 56.0f;

@@ -122,20 +122,16 @@ void FxView::animationTick (double dt)
         history[(size_t) newestRow] = current;
     }
 
-    // WOBBLE and PUMP move only while something plays (the host, the pattern, a chop or the
-    // sample): stopped, they hold where they are at once.
-    bool playing = processor.isHostPlaying() || processor.isPatternPlaying();
-    for (const auto& v : processor.getEngine().getVoiceDisplay())
-        playing = playing || v.chopId.load (std::memory_order_relaxed) != 0;
-    if (playing)
-    {
-        motion += dt;
-        pumpPpq = processor.getPumpPpq(); // PUMP: where in its cycle the pump is
-    }
+    // WOBBLE and PUMP always move, the same whether something plays or not: PUMP on the
+    // pump's own clock (the DAW's or the pattern's beat while they play, its own tempo
+    // otherwise), so the picture is in step with what you hear the moment it starts.
+    motion += dt;
+    pumpPpq = processor.getPumpPpq();
     pumpGain = PumpProcessor::gainAt (pumpPpq, processor.getEffectiveTempo(), { s.pump, (PumpProcessor::Mode) s.pumpMode });
 
     // At rest (silence, the landscape run empty, nothing changed): no repaint.
-    if (idle.update (dt, intro < 1.0f || processor.isSounding(), processor.getParameterChangeCount()))
+    const auto moving = s.wobble > 0.001f || s.pump > 0.001f; // (they move on their own)
+    if (idle.update (dt, intro < 1.0f || processor.isSounding() || moving, processor.getParameterChangeCount()))
         repaint();
 }
 

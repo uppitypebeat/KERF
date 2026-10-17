@@ -489,6 +489,8 @@ void KerfAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int sta
 
         if (run && ! lastPatternRun && ! patternResume.exchange (false))
             internalPpq = 0.0; // the preview starts from step 1 (after PAUSE: where it stopped)
+        if (patternRestart.exchange (false) && run && ! transport.isPlaying)
+            internalPpq = 0.0; // a new pattern (the die): from bar 1 again
         lastPatternRun = run;
 
         const auto followHost = transport.isPlaying;
@@ -1825,12 +1827,57 @@ void KerfAudioProcessor::toggleChopSelection (int chopId)
         ids.insert (ids.begin(), chopId); // in, and shown
     }
 
+    setChopSelection (ids);
+}
+
+void KerfAudioProcessor::setChopSelection (const std::vector<int>& ids)
+{
+    if (ids.empty())
+        return;
     juce::StringArray others;
     for (size_t i = 1; i < ids.size(); ++i)
         others.add (juce::String (ids[i]));
     const juce::ScopedValueSetter<bool> keep (keepSelection, true);
     settings.setProperty (selectedChopsId, others.joinIntoString (","), nullptr);
     settings.setProperty ("selectedChop", ids.front(), nullptr);
+}
+
+void KerfAudioProcessor::selectChopRange (int chopId)
+{
+    // From the chop shown to this one, both ends included, in the timeline's order; the
+    // clicked one is shown.
+    const auto list = chops.getChops();
+    const auto shown = (int) settings.getProperty ("selectedChop", 0);
+    int from = -1, to = -1;
+    for (int i = 0; i < (int) list.size(); ++i)
+    {
+        if (list[(size_t) i].id == shown) from = i;
+        if (list[(size_t) i].id == chopId) to = i;
+    }
+    if (to < 0)
+        return;
+    if (from < 0)
+        from = to;
+    std::vector<int> ids { chopId };
+    for (int i = std::min (from, to); i <= std::max (from, to); ++i)
+        if (list[(size_t) i].id != chopId)
+            ids.push_back (list[(size_t) i].id);
+    setChopSelection (ids);
+}
+
+void KerfAudioProcessor::selectAllChops()
+{
+    const auto list = chops.getChops();
+    if (list.empty())
+        return;
+    const auto shown = (int) settings.getProperty ("selectedChop", 0);
+    std::vector<int> ids;
+    if (chops.getChop (shown).has_value())
+        ids.push_back (shown);
+    for (const auto& c : list)
+        if (c.id != shown)
+            ids.push_back (c.id);
+    setChopSelection (ids);
 }
 
 void KerfAudioProcessor::deleteSelectedChops()
@@ -2678,6 +2725,26 @@ void KerfAudioProcessor::beginNewSample (SampleData::Ptr sample, std::shared_ptr
     undoManager.beginNewTransaction(); // the next edit is a step of its own
 }
 
+void KerfAudioProcessor::unloadSample()
+{
+    // Like loading another sample, only with none: the one there (with its chops, pads and
+    // analysis) is kept for undo.
+    if (info.sample == nullptr)
+        return;
+    saveChopMemory();
+    stopPattern();
+    auto previous = std::make_unique<SampleSession> (takeSession());
+    previous->embeddedAudio.reset();
+    ++loadGeneration;
+    putSession (SampleSession {});
+    chops.getState().removeProperty (IDs::beatOrigin, nullptr);
+    undoManager.beginNewTransaction ("Remove sample");
+    undoManager.perform (new SampleSwapAction (*this, std::move (previous)));
+    undoManager.beginNewTransaction();
+    setStatusMessage ("Sample removed  -  Ctrl+Z brings it back");
+}
+
+
 //==============================================================================
 // TIME slots: settings child TIME_SLOTS, one SLOT per edited slot (index, time, volume).
 
@@ -2741,6 +2808,23 @@ void KerfAudioProcessor::resetTimeSlot (int index)
         slots.removeChild (edited, &undoManager);
         undoManager.beginNewTransaction();
     }
+}
+
+void KerfAudioProcessor::resetTimeSettings (int slot)
+{
+    undoManager.beginNewTransaction ("Reset TIME");
+    auto slots = settings.getChildWithName (timeSlotsId);
+    if (const auto edited = slots.getChildWithProperty ("index", slot); edited.isValid())
+        slots.removeChild (edited, &undoManager);
+    {
+        const ParamUndoGroup group (*this, "Reset TIME");
+        paramGroupStarted = true; // record into the transaction begun above
+        for (const auto* id : { Params::timeMix, Params::timeLength })
+            if (auto* param = parameters.getParameter (id); param != nullptr && std::abs (param->getValue() - param->getDefaultValue()) > 1.0e-6f)
+                setParameterAsGesture (id, param->convertFrom0to1 (param->getDefaultValue()));
+    }
+    undoManager.beginNewTransaction();
+    sendChangeMessage();
 }
 
 double KerfAudioProcessor::getTimeCycleBeats() const noexcept

@@ -194,8 +194,6 @@ public:
     PageOffVeil (ControlPanel& panel, AnimationClock& clock);
     ~PageOffVeil() override;
 
-    /** Where the page's view is (the message sits in its middle). */
-    void setViewArea (juce::Rectangle<float> area) { viewArea = area; repaint(); }
     void paint (juce::Graphics&) override;
 
 private:
@@ -203,7 +201,6 @@ private:
 
     ControlPanel& panel;
     AnimationClock& clock;
-    juce::Rectangle<float> viewArea;
     int page = -1;
     float amount = 0.0f; // 0 = on (invisible) .. 1 = off
     float sweep = 1.0f;  // the light crossing once as the page goes off

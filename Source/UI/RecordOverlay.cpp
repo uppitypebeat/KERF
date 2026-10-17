@@ -33,8 +33,8 @@ RecordOverlay::RecordOverlay (KerfAudioProcessor& p, AnimationClock& c) : proces
 {
     addAndMakeVisible (stop);
     addAndMakeVisible (cancel);
-    stop.setTooltip ("Finish and keep the recording as the new sample");
-    cancel.setTooltip ("Discard the recording");
+    stop.setTooltip ("Stop and keep the recording");
+    cancel.setTooltip ("Throw the recording away");
     stop.onClick = [this] { processor.getRecorder().requestStop(); };
     cancel.onClick = [this] { processor.getRecorder().requestCancel(); };
     setInterceptsMouseClicks (true, true); // block waveform edits while recording
@@ -148,11 +148,11 @@ RecordTools::RecordTools (KerfAudioProcessor& p, AnimationClock& c) : processor 
     for (auto* b : { &recButton, &captureButton, &resampleButton })
         addAndMakeVisible (b);
 
-    recButton.setTooltip ("REC: record audio coming into KERF from the DAW (needs input routing)");
+    recButton.setTooltip ("Record audio coming into KERF from the DAW");
     recButton.onClick = [this] { handleRecordButton (processor, AudioRecorder::Source::input, recButton); };
-    captureButton.setTooltip ("CAPTURE: record what KERF plays (your performance or pattern) as a new sample");
+    captureButton.setTooltip ("Record what KERF plays");
     captureButton.onClick = [this] { handleRecordButton (processor, AudioRecorder::Source::output, captureButton); };
-    resampleButton.setTooltip ("RESAMPLE: turn the SEQ pattern, with every effect, into a new sample (one seamless loop) to chop again. Undo brings the old sample back.");
+    resampleButton.setTooltip ("Turn the pattern into a new sample");
     resampleButton.onClick = [this] { processor.resamplePatternAsync ({}); };
     clock.add (this);
 }

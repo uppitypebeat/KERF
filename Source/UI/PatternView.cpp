@@ -97,16 +97,16 @@ PatternView::PatternView (KerfAudioProcessor& p, AnimationClock& c) : processor 
     };
 
     addAndMakeVisible (pages);
-    pages.setTooltip ("Which bar is shown");
+    pages.setTooltip ("Which bar you see");
     pages.onChange = [this] (int i) { page = i; repaint(); };
 
     addAndMakeVisible (play);
     play.setIconWhenOn (IconButton::Icon::stop);
-    play.setTooltip ("Play / stop the pattern. After using it or editing the steps, Space plays the pattern too. While the DAW plays, the pattern follows its timeline.");
+    play.setTooltip ("Play / stop the pattern");
     play.onClick = [this] { processor.setPatternPlaying (play.getToggleState()); };
 
     addAndMakeVisible (clear);
-    clear.setTooltip ("Remove every step (undoable)");
+    clear.setTooltip ("Remove all steps");
     clear.onClick = [this]
     {
         processor.getUndoManager().beginNewTransaction ("Clear pattern");
@@ -119,7 +119,7 @@ PatternView::PatternView (KerfAudioProcessor& p, AnimationClock& c) : processor 
     dice.onRightClick = [this] { showDiceMenu(); };
 
     addAndMakeVisible (exportButton);
-    exportButton.setTooltip ("Render the pattern (or the current sample) to a WAV file");
+    exportButton.setTooltip ("Save the pattern or the sample as a WAV file");
     exportButton.onClick = [this] { showExportMenu(); };
 
 
@@ -138,16 +138,16 @@ PatternView::PatternView (KerfAudioProcessor& p, AnimationClock& c) : processor 
         return attachment;
     };
     swingField.setSuffix ("%");
-    swingField.setTooltip ("SWING: delays every second 16th. 50% = straight, 66% = triplet feel, 75% = heavy. Drag or double-click.");
+    swingField.setTooltip ("Swing: 50% is straight");
     swingAttachment = attachField (swingField, Params::swing, 25.0, 50.0);
     humanField.setSuffix ("%");
     for (auto* f : { &swingField, &humanField })
         f->setJustification (juce::Justification::centredRight); // flush with the column: even space both sides
-    humanField.setTooltip ("HUMAN: small random timing and velocity changes, so the pattern feels played. Drag or double-click.");
+    humanField.setTooltip ("Small random changes in timing and velocity");
     humanAttachment = attachField (humanField, Params::humanize, 100.0, 0.0);
     // Drag straight into the DAW.
     addAndMakeVisible (audioDrag);
-    audioDrag.setTooltip ("Drag the pattern into your DAW as audio (24-bit WAV, rendered with all effects)");
+    audioDrag.setTooltip ("Drag the pattern into your DAW as audio");
     audioDrag.prepare = [this] (std::function<void (juce::File)> done)
     {
         if (events.empty())
@@ -168,7 +168,7 @@ PatternView::PatternView (KerfAudioProcessor& p, AnimationClock& c) : processor 
     };
 
     addAndMakeVisible (midiDrag);
-    midiDrag.setTooltip ("Drag the pattern into your DAW as MIDI (on a KERF channel the notes play the same chops)");
+    midiDrag.setTooltip ("Drag the pattern into your DAW as MIDI");
     midiDrag.prepare = [this] (std::function<void (juce::File)> done)
     {
         if (events.empty())
@@ -868,6 +868,8 @@ void PatternView::randomPattern()
     }
     um.beginNewTransaction();
     diceSpin = 0.0f; // the die turns once
+    if (processor.isPatternPlaying())
+        processor.restartPattern(); // playing: the new pattern from bar 1
 
     // What it made, in a few words.
     auto text = "Dice: " + rolled.name;

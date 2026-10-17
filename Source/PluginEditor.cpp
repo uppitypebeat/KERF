@@ -10,19 +10,19 @@ FooterBar::FooterBar (KerfAudioProcessor& p, AnimationClock& c) : processor (p),
     auto& params = processor.getParameters();
 
     addAndMakeVisible (voices);
-    voices.setTooltip ("Maximum number of chops sounding at once");
+    voices.setTooltip ("How many chops can sound at once");
     voicesAttachment = std::make_unique<juce::ParameterAttachment> (*params.getParameter (Params::voices),
                                                                     [this] (float v) { voices.setValue (v); });
     voices.onChange = [this] (double v) { voicesAttachment->setValueAsCompleteGesture ((float) v); };
 
     addAndMakeVisible (retrigger);
-    retrigger.setTooltip ("POLY: notes overlap  -  SAME: a repeated note cuts itself  -  MONO: every note cuts the others");
+    retrigger.setTooltip ("POLY: notes overlap. SAME: a note cuts itself. MONO: one note at a time");
     retriggerAttachment = std::make_unique<juce::ParameterAttachment> (*params.getParameter (Params::retrigger),
                                                                        [this] (float v) { retrigger.setSelected ((int) v, juce::dontSendNotification); });
     retrigger.onChange = [this] (int v) { retriggerAttachment->setValueAsCompleteGesture ((float) v); };
 
     addAndMakeVisible (quantize);
-    quantize.setTooltip ("Delay incoming notes to the next grid line while the host is playing");
+    quantize.setTooltip ("Puts played notes on the grid while the DAW plays");
     quantizeAttachment = std::make_unique<juce::ParameterAttachment> (*params.getParameter (Params::quantize),
                                                                       [this] (float v) { quantize.setSelected ((int) v, juce::dontSendNotification); });
     quantize.onChange = [this] (int v) { quantizeAttachment->setValueAsCompleteGesture ((float) v); };
@@ -178,7 +178,7 @@ MainView::MainView (KerfAudioProcessor& p, AnimationClock& c)
     const auto showSeq = (int) p.getSettings().getProperty ("performView", 0) == 1;
     performTabs.setVertical (true); // PADS above SEQ: more room for the pads and steps
     performTabs.setSelected (showSeq ? 1 : 0, juce::dontSendNotification);
-    performTabs.setTooltip ("PADS: play and select chops  -  SEQ: build a pattern from chops");
+    performTabs.setTooltip ("PADS: play the chops. SEQ: build a pattern");
     performTabs.onChange = [this, &p] (int v)
     {
         p.getSettings().setProperty ("performView", v, nullptr);
@@ -272,11 +272,7 @@ void MainView::resized()
 
     const auto view = r.reduced (16, 0);
     waveform.setBounds (view);
-    {
-        const auto covered = view.getUnion (controls.getBounds()); // the page: its view and its controls
-        pageOffVeil.setBounds (covered);
-        pageOffVeil.setViewArea (view.translated (-covered.getX(), -covered.getY()).toFloat());
-    }
+    pageOffVeil.setBounds (view.getUnion (controls.getBounds())); // the page: its view and its controls
     grainView.setBounds (view);
     fxView.setBounds (view);
     eqView.setBounds (view);
@@ -640,6 +636,7 @@ bool KerfAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
     if (cmd && key.getKeyCode() == 'Z' && ! mods.isShiftDown()) { um.undo(); return true; }
     if ((cmd && key.getKeyCode() == 'Z' && mods.isShiftDown()) || (cmd && key.getKeyCode() == 'Y')) { um.redo(); return true; }
     if (cmd && key.getKeyCode() == 'O') { openFileChooser(); return true; }
+    if (cmd && key.getKeyCode() == 'A' && view.controls.getPage() == 0) { processor.selectAllChops(); return true; } // every chop
 
     if (key.isKeyCode (juce::KeyPress::leftKey))  { selectAdjacentChop (-1); return true; }
     if (key.isKeyCode (juce::KeyPress::rightKey)) { selectAdjacentChop (1); return true; }

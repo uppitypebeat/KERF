@@ -131,9 +131,16 @@ public:
     // Ctrl, more chops besides it ("selectedChops"). Choosing a chop any other way chooses it alone.
     /** The selected chops, the selected one first. */
     std::vector<int> getSelectedChops() const;
+    void setChopSelection (const std::vector<int>& ids); // the first is shown
     bool isChopSelected (int chopId) const;
     /** Ctrl + click: the chop joins the selection (and is the one shown), or leaves it. */
     void toggleChopSelection (int chopId);
+    /** Shift + click: every chop from the one shown to `chopId` (in the timeline) selected. */
+    void selectChopRange (int chopId);
+    /** Ctrl+A: every chop selected (the one shown stays shown). */
+    void selectAllChops();
+    /** The sample out of KERF (back to the start screen). One undo step: Ctrl+Z brings it back. */
+    void unloadSample();
     /** The bin in the toolbar: the selected chops gone (their stretch of the sample is no chop
         any more; all of them: one chop over the whole sample again). One undo step. */
     void deleteSelectedChops();
@@ -153,6 +160,8 @@ public:
     void pausePattern() { patternResume.store (true); setPatternPlaying (false); }
     void resumePattern() { patternResume.store (true); setPatternPlaying (true); }
     void stopPattern() { patternResume.store (false); setPatternPlaying (false); }
+    /** The pattern playing here (not following the DAW) starts again from bar 1. */
+    void restartPattern() { patternRestart.store (true); }
     /** PAUSE for chops played from the UI (the top-right PLAY): they hold where they are. */
     void setPreviewsPaused (bool paused) noexcept { previewsPaused.store (paused); }
     bool arePreviewsPaused() const noexcept { return previewsPaused.load(); }
@@ -245,6 +254,9 @@ public:
     kerf::TimeSlot getTimeSlot (int index) const;                 // edited, or the factory shape
     void setTimeSlot (int index, const kerf::TimeSlot& slot);     // one undo step per gesture (the caller begins it)
     void resetTimeSlot (int index);                               // back to the factory shape (undoable)
+    /** The TIME page back to how it started: the slot's TIME and VOLUME curves, MIX and the
+        cycle length. One undo step. */
+    void resetTimeSettings (int slot);
     bool isTimeSlotEdited (int index) const;
     double getTimeCycleBeats() const noexcept;                    // 2, 4 or 8
     const kerf::TimeShaper& getTimeShaper() const noexcept { return timeShaper; }
@@ -430,6 +442,7 @@ private:
     kerf::PatternPlayer patternPlayer;
     kerf::AudioRecorder recorder;
     bool lastPatternRun = false; // audio thread
+    std::atomic<bool> patternRestart { false };
     bool hostWasPlaying = false; // audio thread
     std::atomic<bool> hostStarted { false }, patternRanBeforeHost { false };
     double internalPpq = 0.0;

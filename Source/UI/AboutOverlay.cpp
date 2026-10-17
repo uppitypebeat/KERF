@@ -71,7 +71,7 @@ AboutOverlay::AboutOverlay (AnimationClock& c) : clock (c)
     addChildComponent (licences);
 
     addAndMakeVisible (licencesButton);
-    licencesButton.setTooltip ("The licences of the libraries and typefaces KERF uses");
+    licencesButton.setTooltip ("Licences of the libraries and fonts KERF uses");
     licencesButton.onClick = [this] { licences.setVisible (licencesButton.getToggleState()); repaint(); };
     addAndMakeVisible (close);
     close.onClick = [this] { hide(); };

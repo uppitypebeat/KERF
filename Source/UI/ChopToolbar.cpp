@@ -9,7 +9,7 @@ ChopToolbar::ChopToolbar (KerfAudioProcessor& p, WaveformView& w)
 {
     addAndMakeVisible (modes);
     modes.setSelected ((int) settings.getProperty ("chopMode", 0), juce::dontSendNotification);
-    modes.setTooltip ("How to chop: rhythmic grid, equal slices, transients, beats, random or smart (rule-based) suggestions");
+    modes.setTooltip ("How to cut the sample into chops");
     modes.onChange = [this] (int m)
     {
         if (m != (int) settings.getProperty ("chopMode", 0))
@@ -24,42 +24,42 @@ ChopToolbar::ChopToolbar (KerfAudioProcessor& p, WaveformView& w)
     // Grid
     addChildComponent (gridValue);
     gridValue.setSelected ((int) settings.getProperty ("gridValue", 4), juce::dontSendNotification);
-    gridValue.setTooltip ("Note value of one grid step");
+    gridValue.setTooltip ("Length of one grid step");
     gridValue.onChange = [this] (int v) { settings.setProperty ("gridValue", v, nullptr); settingChanged(); };
 
     addChildComponent (gridModifier);
     gridModifier.setSelected ((int) settings.getProperty ("gridModifier", 0), juce::dontSendNotification);
-    gridModifier.setTooltip ("STR straight  -  TRI triplet (3 in the time of 2)  -  DUP duplet (2 in the time of 3)  -  DOT dotted");
+    gridModifier.setTooltip ("Straight, triplet, duplet or dotted");
     gridModifier.onChange = [this] (int v) { settings.setProperty ("gridModifier", v, nullptr); settingChanged(); };
 
     // Count (equal / random / smart)
     addChildComponent (count);
     count.setValue ((int) settings.getProperty ("sliceCount", 8));
-    count.setTooltip ("Number of chops. Drag or double-click.");
+    count.setTooltip ("Number of chops");
     count.onChange = [this] (double v) { settings.setProperty ("sliceCount", (int) v, nullptr); settingChanged(); };
 
     // Transients
     addChildComponent (sensitivity);
     sensitivity.setSuffix ("%");
     sensitivity.setValue ((float) settings.getProperty ("sensitivity", 0.3f) * 100.0);
-    sensitivity.setTooltip ("Higher finds more, quieter transients");
+    sensitivity.setTooltip ("Higher finds more, quieter hits");
     sensitivity.onChange = [this] (double v) { settings.setProperty ("sensitivity", (float) v / 100.0f, nullptr); settingChanged(); };
 
     addChildComponent (minDistance);
     minDistance.setSuffix (" ms");
     minDistance.setValue ((float) settings.getProperty ("minDistance", 0.12f) * 1000.0);
-    minDistance.setTooltip ("Minimum time between chops");
+    minDistance.setTooltip ("Shortest time between two chops");
     minDistance.onChange = [this] (double v) { settings.setProperty ("minDistance", (float) v / 1000.0f, nullptr); settingChanged(); };
 
     // Beats
     addChildComponent (beats);
     beats.setSelected ((int) settings.getProperty ("beatsPerChop", 1), juce::dontSendNotification);
-    beats.setTooltip ("Beats per chop (uses the sample tempo)");
+    beats.setTooltip ("Beats per chop");
     beats.onChange = [this] (int v) { settings.setProperty ("beatsPerChop", v, nullptr); settingChanged(); };
 
     // Random
     addChildComponent (reroll);
-    reroll.setTooltip ("New random chops");
+    reroll.setTooltip ("New random cuts");
     reroll.onClick = [this]
     {
         settings.setProperty ("randomSeed", (int) settings.getProperty ("randomSeed", 1) + 1, nullptr);
@@ -68,7 +68,7 @@ ChopToolbar::ChopToolbar (KerfAudioProcessor& p, WaveformView& w)
     };
 
     addChildComponent (shift);
-    shift.setTooltip ("SHIFT: moves the sample against the beat lines (+: the sample later). Line the lines up with the hits, then BEAT cuts on them; the metronome and grid snapping follow. Drag (Shift: fine), mouse wheel: 1 ms (Shift: 0.1 ms), double-click: back to 0");
+    shift.setTooltip ("Moves the sample against the beat lines. Double-click: back to 0");
     shift.onChange = [this] (double ms)
     {
         processor.setSampleShift (ms / 1000.0);
@@ -76,14 +76,14 @@ ChopToolbar::ChopToolbar (KerfAudioProcessor& p, WaveformView& w)
     };
 
     addAndMakeVisible (applyButton);
-    applyButton.setTooltip ("Replace the chops (undoable)");
+    applyButton.setTooltip ("Cut the sample with these settings");
     applyButton.onClick = [this] { apply(); };
     applyButton.setPrimary (false); // lights up when there is something to apply
 
     // Right side
     addAndMakeVisible (scope);
     scope.setSelected ((int) settings.getProperty ("chopScope", 0), juce::dontSendNotification);
-    scope.setTooltip ("ALL: chop the whole sample  -  CHOP: chop only inside the selected chop");
+    scope.setTooltip ("ALL: the whole sample. CHOP: only the selected chop");
     scope.onChange = [this] (int v) { settings.setProperty ("chopScope", v, nullptr); lastAppliedMode = -1; updatePending(); };
 
     appliedSignature = settingsSignature(); // nothing to apply at first
@@ -281,16 +281,16 @@ WaveTools::WaveTools (KerfAudioProcessor& p, WaveformView& w, AnimationClock& c)
 {
     addAndMakeVisible (snap);
     snap.setToggleState ((bool) processor.getSettings().getProperty ("snap", true), juce::dontSendNotification);
-    snap.setTooltip ("Snap: boundaries snap to transients and the grid (hold Shift to bypass)");
+    snap.setTooltip ("Snap cuts to hits and the grid (hold Shift to turn it off)");
     snap.onClick = [this] { processor.getSettings().setProperty ("snap", snap.getToggleState(), nullptr); };
 
     addAndMakeVisible (knife);
-    knife.setTooltip ("Knife (K): click the waveform to split. Without it, double-click splits.");
+    knife.setTooltip ("Knife (K): click the waveform to cut");
     knife.onClick = [this] { waveform.setKnifeMode (knife.getToggleState()); };
 
     addAndMakeVisible (bin);
     bin.setDangerOnHover (true);
-    bin.setTooltip ("Delete the selected chops (Ctrl + click picks more). Ctrl+Z brings them back");
+    bin.setTooltip ("Delete the selected chops");
     bin.onClick = [this] { processor.deleteSelectedChops(); };
 
     clock.add (this);
@@ -335,23 +335,23 @@ TransportTools::TransportTools (AnimationClock& c) : clock (c)
 {
     addAndMakeVisible (play);
     play.setIconWhenOn (IconButton::Icon::pause);
-    play.setTooltip ("Play the whole selected chop / pause (PLAY again goes on from there). Space: play / stop");
+    play.setTooltip ("Play / pause (Space)");
     play.onClick = [this] { if (onPlayPause) onPlayPause(); };
 
     addAndMakeVisible (stop);
-    stop.setTooltip ("Stop the chop and the pattern (the next PLAY starts from the beginning)");
+    stop.setTooltip ("Stop");
     stop.onClick = [this] { if (onStop) onStop(); };
 
     addAndMakeVisible (scope);
-    scope.setTooltip ("What PLAY and Space play: CHOP = the selected chop, SAMPLE = the whole sample from the start");
+    scope.setTooltip ("What PLAY plays: the selected chop or the whole sample");
     scope.onChange = [this] (int s) { if (onScope) onScope (s); };
 
     addAndMakeVisible (loop);
-    loop.setTooltip ("Loop: the chop played with PLAY or Space repeats until you stop it");
+    loop.setTooltip ("Repeat what PLAY plays");
     loop.onClick = [this] { if (onLoop) onLoop (loop.getToggleState()); };
 
     addAndMakeVisible (metronome);
-    metronome.setTooltip ("Metronome: a click on every beat while the song or the pattern plays (not recorded)");
+    metronome.setTooltip ("A click on every beat");
     metronome.onClick = [this] { if (onMetronome) onMetronome (metronome.getToggleState()); };
 
     clock.add (this);

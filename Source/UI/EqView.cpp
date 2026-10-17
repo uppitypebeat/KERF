@@ -537,17 +537,17 @@ void EqTypeTools::TypeButton::paintButton (juce::Graphics& g, bool highlighted, 
 EqTypeTools::EqTypeTools (KerfAudioProcessor& p, AnimationClock& c) : processor (p), clock (c)
 {
     static const char* tips[] = {
-        "BELL: lifts or lowers a band around a frequency",
-        "LOW SHELF: lifts or lowers everything below a frequency",
-        "HIGH SHELF: lifts or lowers everything above a frequency",
-        "LOW CUT: removes the lows below a frequency",
-        "HIGH CUT: removes the highs above a frequency",
-        "NOTCH: cuts out a narrow band (a ring, a hum)"
+        "BELL: boost or cut around a frequency",
+        "LOW SHELF: boost or cut the lows",
+        "HIGH SHELF: boost or cut the highs",
+        "LOW CUT: remove the lows",
+        "HIGH CUT: remove the highs",
+        "NOTCH: remove a narrow band"
     };
     for (int t = 0; t < numTypes; ++t)
     {
         auto button = std::make_unique<TypeButton> (t);
-        button->setTooltip (juce::String (tips[t]) + ". Click: the selected point gets this type (none selected: a new point)");
+        button->setTooltip (tips[t]);
         button->onClick = [this, t] { choose (t); };
         addAndMakeVisible (*button);
         buttons.push_back (std::move (button));

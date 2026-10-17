@@ -1738,6 +1738,14 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    if (const auto id = processor.getChops().chopIdAt (frame); id != 0 && e.mods.isShiftDown() && id != selectedChopId() && ! e.mods.isPopupMenu())
+    {
+        // Shift + click: every chop from the one shown to this one.
+        processor.selectChopRange (id);
+        repaint();
+        return;
+    }
+
     if (const auto id = processor.getChops().chopIdAt (frame); id != 0 && e.mods.isCommandDown())
     {
         // Ctrl (Cmd on a Mac) + click: the chop joins the selection, or leaves it.
@@ -1962,6 +1970,8 @@ void WaveformView::showContextMenu (int64_t frame)
     menu.addItem ("Zoom to fit", [this] { zoomToFit(); });
     menu.addSeparator();
     menu.addItem ("Remap notes by position", [&model, &um] { um.beginNewTransaction ("Remap notes"); model.remapByPosition(); });
+    menu.addSeparator();
+    menu.addItem ("Remove the sample from KERF", [this] { processor.unloadSample(); });
 
     menu.setLookAndFeel (&getLookAndFeel()); // the plugin's menu style (menus use the default look otherwise)
 
