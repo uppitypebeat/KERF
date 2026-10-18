@@ -41,25 +41,13 @@ namespace
     }
 }
 
-int timeEditSlot (KerfAudioProcessor& p)
-{
-    if (const auto active = activeSlot (p); active >= 0)
-        return active;
-    return juce::jlimit (0, TimeFactory::numSlots - 1, (int) p.getSettings().getProperty ("timeEditSlot", 0));
-}
-
-void setTimeEditSlot (KerfAudioProcessor& p, int slot)
-{
-    p.getSettings().setProperty ("timeEditSlot", juce::jlimit (0, TimeFactory::numSlots - 1, slot), nullptr);
-}
-
 //==============================================================================
 TimeView::TimeView (KerfAudioProcessor& p, AnimationClock& c) : processor (p), clock (c)
 {
     speedHistory.fill (1.0f);
-    addAndMakeVisible (reset);
+    addChildComponent (reset);
     reset.setTooltip ("Back to the slot's original shape");
-    reset.onClick = [this] { processor.resetTimeSlot (shownSlot); };
+    reset.onClick = [this] { if (shownSlot >= 0) processor.resetTimeSlot (shownSlot); };
     clock.add (this);
 }
 
@@ -83,12 +71,13 @@ void TimeView::resized()
     tapeScreen = right.removeFromTop (right.getHeight() * 0.6f);
     right.removeFromTop (8.0f);
     speedScreen = right;
-    if (shownSlot >= 0)
-        placeReset();
+    placeReset();
 }
 
 juce::String TimeView::slotTitle() const
 {
+    if (shownSlot < 0)
+        return "NO SLOT  -  PICK ONE BELOW";
     return "SLOT " + juce::String (shownSlot + 1).paddedLeft ('0', 2) + "  " + TimeFactory::name (shownSlot)
            + (processor.isTimeSlotEdited (shownSlot) ? "  (EDITED)" : "");
 }
@@ -99,7 +88,8 @@ void TimeView::placeReset()
     placedFor = slotTitle();
     const auto x = header.getX() + 12.0f + 52.0f + textWidth (placedFor, TextStyle::micro) + 10.0f;
     reset.setBounds (juce::Rectangle<float> (x, header.getCentreY() - 9.0f, 46.0f, 18.0f).toNearestInt());
-    reset.setEnabled (processor.isTimeSlotEdited (shownSlot));
+    reset.setVisible (shownSlot >= 0);
+    reset.setEnabled (shownSlot >= 0 && processor.isTimeSlotEdited (shownSlot));
 }
 
 juce::Rectangle<float> TimeView::plotArea (int lane) const
@@ -165,8 +155,9 @@ void TimeView::animationTick (double dt)
 
     const auto previousSlot = shownSlot;
     const auto previous = shown;
-    shownSlot = timeEditSlot (processor);
-    shown = processor.getTimeSlot (shownSlot);
+    // The slot that is on; none: the factory setting (live, full volume).
+    shownSlot = activeSlot (processor);
+    shown = shownSlot >= 0 ? processor.getTimeSlot (shownSlot) : TimeSlot {};
     const auto edited = shownSlot != previousSlot || ! (shown.time == previous.time) || ! (shown.volume == previous.volume);
     if (slotTitle() != placedFor)
         placeReset(); // another slot, or it was edited / reset
@@ -182,20 +173,21 @@ void TimeView::animationTick (double dt)
     }
 
     const auto& shaper = processor.getTimeShaper();
-    const auto live = shaper.isEngaged() && activeSlot (processor) == shownSlot;
+    const auto live = shownSlot >= 0 && shaper.isEngaged();
     engaged += ((live ? 1.0f : 0.0f) - engaged) * std::min (1.0f, (float) dt * 6.0f);
     beam = shaper.getDisplayPosition();
     const auto playing = shaper.isClockRunning() && processor.isProcessing(); // a host that stops processing has stopped too
     running += ((playing ? 1.0f : 0.0f) - running) * std::min (1.0f, (float) dt * 8.0f); // the beam's trail
 
-    // The tape: its speed glides (reels have weight), and the trace scrolls on.
-    const auto target = live ? shaper.getDisplaySpeed() : 1.0f;
-    speed += (target - speed) * std::min (1.0f, (float) dt * 10.0f);
-    // Each reel keeps its own angle (wrapping one from the other made the right one jump);
-    // the smaller take-up pack turns faster.
     // The tape only runs while something plays (the song, the pattern, a chop): it spins
     // up and runs down with weight; the SPEED trace scrolls only then too.
     const auto tapeOn = playing || processor.isSounding();
+    // The tape: its speed glides (reels have weight), and the trace scrolls on. Paused, the
+    // speed stays where it was (without a slot: 1x).
+    const auto target = ! live ? 1.0f : (tapeOn ? shaper.getDisplaySpeed() : speed);
+    speed += (target - speed) * std::min (1.0f, (float) dt * 10.0f);
+    // Each reel keeps its own angle (wrapping one from the other made the right one jump);
+    // the smaller take-up pack turns faster.
     tapeRun += ((tapeOn ? 1.0f : 0.0f) - tapeRun) * std::min (1.0f, (float) dt * 4.0f);
     if (tapeRun < 0.001f && ! tapeOn) tapeRun = 0.0f;
     reelAngle = std::fmod (reelAngle + (float) dt * speed * 4.5f * tapeRun, 2.0f * pi);
@@ -221,7 +213,7 @@ void TimeView::paint (juce::Graphics& g)
     {
         auto h = header.reduced (12.0f, 0.0f);
         drawText (g, "TIME", h.removeFromLeft (52.0f), TextStyle::sectionLabel, Colours::text);
-        const auto active = activeSlot (processor) == shownSlot;
+        const auto active = shownSlot >= 0; // (the slot shown is the one on)
         drawText (g, slotTitle(), h.removeFromLeft (220.0f), TextStyle::micro, active ? Colours::accent : Colours::textDim);
 
         static const char* cycles[] = { "1/2 BAR", "1 BAR", "2 BARS" };
@@ -328,8 +320,8 @@ void TimeView::paintCurveScreen (juce::Graphics& g, int lane)
         }
     }
 
-    // Points: handles (the first and last stay at the ends of the cycle).
-    for (int i = 0; i < c.numPoints; ++i)
+    // Points: handles (the first and last stay at the ends of the cycle). No slot on: none.
+    for (int i = 0; i < (shownSlot >= 0 ? c.numPoints : 0); ++i)
     {
         const auto p = toScreen (lane, c.x[(size_t) i], c.y[(size_t) i]);
         const auto hot = (hover.lane == lane && hover.index == i) || (drag.lane == lane && drag.index == i);
@@ -385,17 +377,6 @@ void TimeView::paintTape (juce::Graphics& g, juce::Rectangle<float> s)
         tape.quadraticTo (right.x - r * 0.4f, head.y + 2.0f, right.x + takeUp * 0.2f, right.y + takeUp);
         g.setColour (screen::hud().withAlpha (0.45f));
         g.strokePath (tape, juce::PathStrokeType (1.4f));
-    }
-    // The head glows while TIME plays.
-    {
-        const auto box = juce::Rectangle<float> (26.0f, 9.0f).withCentre (head.translated (0.0f, 6.0f));
-        g.setGradientFill (juce::ColourGradient (signal().withAlpha (0.45f * engaged), box.getCentreX(), box.getCentreY(),
-                                                 signal().withAlpha (0.0f), box.getCentreX() + 30.0f, box.getCentreY(), true));
-        g.fillEllipse (box.expanded (24.0f, 14.0f));
-        g.setColour (screen::bg());
-        g.fillRoundedRectangle (box, 2.0f);
-        g.setColour (signal().interpolatedWith (screen::hud(), 1.0f - engaged).withAlpha (0.8f));
-        g.drawRoundedRectangle (box, 2.0f, 1.2f);
     }
 
     // The reels: a pack of tape round a hub with three windows, turning with the speed.
@@ -474,6 +455,12 @@ void TimeView::paintSpeed (juce::Graphics& g, juce::Rectangle<float> s)
 void TimeView::mouseMove (const juce::MouseEvent& e)
 {
     idle.wake();
+    if (shownSlot < 0)
+    {
+        hover = {};
+        setMouseCursor (juce::MouseCursor::NormalCursor); // no slot on: nothing to draw on
+        return;
+    }
     hover = hitTest (e.position);
     setMouseCursor (hover.index >= 0 ? juce::MouseCursor::DraggingHandCursor
                                      : (laneAt (e.position) >= 0 ? juce::MouseCursor::CrosshairCursor : juce::MouseCursor::NormalCursor));
@@ -487,6 +474,9 @@ void TimeView::mouseExit (const juce::MouseEvent&)
 
 void TimeView::mouseDown (const juce::MouseEvent& e)
 {
+    drag = {};
+    if (shownSlot < 0)
+        return; // no slot on: the factory setting, nothing to edit
     const auto lane = laneAt (e.position);
     if (e.mods.isPopupMenu())
     {
@@ -521,7 +511,7 @@ void TimeView::mouseDown (const juce::MouseEvent& e)
 void TimeView::mouseDrag (const juce::MouseEvent& e)
 {
     idle.wake();
-    if (drag.index < 0)
+    if (drag.index < 0 || shownSlot < 0)
         return;
     auto slot = processor.getTimeSlot (shownSlot);
     auto& c = curveOf (slot, drag.lane);
@@ -546,6 +536,8 @@ void TimeView::mouseUp (const juce::MouseEvent&)
 
 void TimeView::mouseDoubleClick (const juce::MouseEvent& e)
 {
+    if (shownSlot < 0)
+        return;
     const auto hit = hitTest (e.position);
     auto slot = processor.getTimeSlot (shownSlot);
     auto& c = curveOf (slot, hit.lane < 0 ? 0 : hit.lane);
@@ -565,9 +557,8 @@ void TimeView::mouseDoubleClick (const juce::MouseEvent& e)
 
 void TimeView::store (const TimeSlot& slot)
 {
-    processor.setTimeSlot (shownSlot, slot);
-    if (activeSlot (processor) < 0)
-        processor.setParameterAsGesture (Params::timeSlot, (float) (shownSlot + 1));
+    if (shownSlot >= 0)
+        processor.setTimeSlot (shownSlot, slot);
 }
 
 void TimeView::showMenu (int lane)
@@ -651,14 +642,8 @@ void TimeSlots::animationTick (double dt)
         setBank (active / TimeFactory::slotsPerBank);
         if (onBankChanged) onBankChanged (bank);
     }
-    else if (shownEdit == -2 && active < 0 && timeEditSlot (processor) / TimeFactory::slotsPerBank != bank)
-    {
-        setBank (timeEditSlot (processor) / TimeFactory::slotsPerBank); // the first look: the bank of the slot shown above
-        if (onBankChanged) onBankChanged (bank);
-    }
-    bool changed = active != shownActive || timeEditSlot (processor) != shownEdit;
+    bool changed = active != shownActive;
     shownActive = active;
-    shownEdit = timeEditSlot (processor);
     for (int k = 0; k < TimeFactory::numSlots; ++k)
     {
         const auto target = k == active ? 1.0f : 0.0f;
@@ -675,15 +660,12 @@ void TimeSlots::animationTick (double dt)
 
 void TimeSlots::paint (juce::Graphics& g)
 {
-    const auto active = activeSlot (processor);
-    const auto edit = timeEditSlot (processor);
     const auto& shaper = processor.getTimeShaper();
 
     for (int k = bank * TimeFactory::slotsPerBank; k < (bank + 1) * TimeFactory::slotsPerBank; ++k)
     {
         const auto b = cardBounds (k).reduced (0.5f);
         const auto on = glow[(size_t) k];
-        const auto isEdit = k == edit && active < 0;
 
         g.setColour ((k == hovered ? Colours::surfaceHover : Colours::surfaceRaised));
         g.fillRoundedRectangle (b, Metrics::radiusSmall);
@@ -692,7 +674,7 @@ void TimeSlots::paint (juce::Graphics& g)
             g.setColour (Colours::accent.withAlpha (0.10f + 0.10f * on));
             g.fillRoundedRectangle (b, Metrics::radiusSmall);
         }
-        g.setColour (on > 0.5f ? Colours::accent : (isEdit ? Colours::textDim : Colours::hairline));
+        g.setColour (on > 0.5f ? Colours::accent : Colours::hairline);
         g.drawRoundedRectangle (b, Metrics::radiusSmall, on > 0.5f ? 1.4f : Metrics::hairline);
 
         auto inner = b.reduced (6.0f, 4.0f);
@@ -759,7 +741,6 @@ void TimeSlots::mouseDown (const juce::MouseEvent& e)
     {
         juce::PopupMenu menu;
         menu.addSectionHeader ("SLOT " + juce::String (k + 1) + "  " + TimeFactory::name (k));
-        menu.addItem ("Edit (without switching it on)", [this, k] { setTimeEditSlot (processor, k); });
         menu.addItem ("Back to the factory shape", processor.isTimeSlotEdited (k), false, [this, k] { processor.resetTimeSlot (k); });
         menu.setLookAndFeel (&getLookAndFeel());
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
@@ -771,9 +752,8 @@ void TimeSlots::mouseDown (const juce::MouseEvent& e)
 
 void TimeSlots::clickSlot (int k)
 {
-    // This slot on (and shown). The active one again: off, and its TIME and VOLUME curves
-    // back to how they came.
-    setTimeEditSlot (processor, k);
+    // A slot: selected (on), its TIME and VOLUME curves shown. The selected one again:
+    // deselected, its curves back to how they came, the page back to the factory setting.
     if (activeSlot (processor) == k)
         processor.switchTimeSlotOff (k);
     else

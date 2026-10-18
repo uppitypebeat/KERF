@@ -673,6 +673,7 @@ void WaveformView::paint (juce::Graphics& g)
         paintGrains (g);
         paintPlayheads (g);
         paintDragReadout (g);
+        paintBox (g);
     }
 
     paintRuler (g);
@@ -1627,6 +1628,44 @@ void WaveformView::paintDragReadout (juce::Graphics& g)
     drawText (g, text, box, TextStyle::micro, Screen::ink(), juce::Justification::centred);
 }
 
+juce::Rectangle<float> WaveformView::boxBounds() const
+{
+    // From where Ctrl + drag started to the mouse, inside the waveform.
+    const auto x0 = juce::jlimit (waveArea.getX(), waveArea.getRight(), (float) frameToX (boxStartFrame));
+    const auto x1 = juce::jlimit (waveArea.getX(), waveArea.getRight(), mousePos.x);
+    const auto y1 = juce::jlimit (waveArea.getY(), waveArea.getBottom(), mousePos.y);
+    return juce::Rectangle<float>::leftTopRightBottom (std::min (x0, x1), std::min (boxStartY, y1), std::max (x0, x1), std::max (boxStartY, y1));
+}
+
+void WaveformView::applyBox()
+{
+    // Every chop the box touches (left to right) is selected; the one the drag started on
+    // is shown. A box over no chop leaves the selection as it was.
+    const auto lo = std::min (boxStartFrame, xToFrame (juce::jlimit (waveArea.getX(), waveArea.getRight(), mousePos.x)));
+    const auto hi = std::max (boxStartFrame, xToFrame (juce::jlimit (waveArea.getX(), waveArea.getRight(), mousePos.x)));
+    std::vector<int> ids;
+    for (const auto& c : processor.getChops().getChops())
+        if ((double) c.start <= hi && (double) c.end > lo)
+            ids.push_back (c.id);
+    if (ids.empty())
+        return;
+    if (const auto it = std::find (ids.begin(), ids.end(), boxPressedChop); it != ids.end())
+        std::rotate (ids.begin(), it, it + 1);
+    if (ids != processor.getSelectedChops())
+        processor.setChopSelection (ids);
+}
+
+void WaveformView::paintBox (juce::Graphics& g)
+{
+    if (dragMode != DragMode::box || ! boxDrawn)
+        return;
+    const auto box = boxBounds();
+    g.setColour (Colours::accent.withAlpha (0.10f));
+    g.fillRect (box);
+    g.setColour (Colours::accent.withAlpha (0.8f));
+    g.drawRect (box, 1.0f);
+}
+
 //==============================================================================
 void WaveformView::mouseMove (const juce::MouseEvent& e)
 {
@@ -1703,6 +1742,18 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
 
     clickOnSelected = false;
 
+    // Ctrl (Cmd on a Mac): a click toggles the chop in the selection (on release), a drag
+    // draws a box - the chops it touches are the selection.
+    if (e.mods.isCommandDown() && ! knifeMode)
+    {
+        dragMode = DragMode::box;
+        boxStartFrame = xToFrame (e.position.x);
+        boxStartY = juce::jlimit (waveArea.getY(), waveArea.getBottom(), e.position.y);
+        boxPressedChop = processor.getChops().chopIdAt (frame);
+        boxDrawn = false;
+        return;
+    }
+
     // Grab the playhead PLAY starts at, or the one playing (its handle at the top, or the line where no
     // chop boundary is in the way).
     if ((cursorShown() || targetPlaying()) && ! knifeMode && waveArea.contains (e.position)
@@ -1744,14 +1795,6 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
     {
         // Shift + click: every chop from the one shown to this one.
         processor.selectChopRange (id);
-        repaint();
-        return;
-    }
-
-    if (const auto id = processor.getChops().chopIdAt (frame); id != 0 && e.mods.isCommandDown())
-    {
-        // Ctrl (Cmd on a Mac) + click: the chop joins the selection, or leaves it.
-        processor.toggleChopSelection (id);
         repaint();
         return;
     }
@@ -1838,6 +1881,20 @@ void WaveformView::mouseDrag (const juce::MouseEvent& e)
             break;
         }
 
+        case DragMode::box:
+        {
+            if (! boxDrawn && e.getDistanceFromDragStart() < 3)
+                break;
+            boxDrawn = true;
+            // Past either side: the view scrolls along.
+            const auto span = viewEnd - viewStart;
+            if (e.position.x < waveArea.getX())          setViewNow (viewStart - span * 0.02, viewStart - span * 0.02 + span);
+            else if (e.position.x > waveArea.getRight()) setViewNow (viewStart + span * 0.02, viewStart + span * 0.02 + span);
+            applyBox();
+            repaint();
+            break;
+        }
+
         case DragMode::none:
             break;
     }
@@ -1849,6 +1906,9 @@ void WaveformView::mouseUp (const juce::MouseEvent& e)
         placeSampleCursor (playheadDragFrame);
     else if (dragMode == DragMode::pan && clickOnSelected && e.getDistanceFromDragStart() < 3)
         placeSampleCursor (clickFrame);
+    else if (dragMode == DragMode::box && ! boxDrawn && boxPressedChop != 0)
+        processor.toggleChopSelection (boxPressedChop); // Ctrl + click: the chop joins the selection, or leaves it
+    boxDrawn = false;
     clickOnSelected = false;
     dragMode = DragMode::none;
     dragSnapKind = {};

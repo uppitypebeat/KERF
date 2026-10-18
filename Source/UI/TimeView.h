@@ -6,16 +6,13 @@
 namespace kerf::ui
 {
 
-/** The slot shown and edited on the TIME page (the active one, or the last chosen). */
-int timeEditSlot (KerfAudioProcessor& processor);
-void setTimeEditSlot (KerfAudioProcessor& processor, int slot);
-
 /** TIME view, a synth display like GRAIN and FX.
 
     Left: the slot's TIME curve (top: live, down: further behind; segments coloured by how
     fast the tape runs there: normal, slower, backwards) and its VOLUME curve under it, both
     editable: click to add a point, drag to move it, double-click to remove it, right-click
-    for more; snapped to the grid (Shift: free). A beam follows the beat.
+    for more; snapped to the grid (Shift: free). A beam follows the beat. They show the slot
+    that is on; with none, the factory setting (live, full volume), not editable.
 
     Right, TAPE: two reels turning at the speed playback runs (slowing to a stop, running
     backwards), and SPEED, the last seconds of that speed as a scrolling trace. */
@@ -53,7 +50,7 @@ private:
     int laneAt (juce::Point<float> p) const;
     TimeCurve& curveOf (TimeSlot& slot, int lane) const { return lane == timeLane ? slot.time : slot.volume; }
     void showMenu (int lane);
-    /** After an edit: the shown slot changed, and is switched on when TIME was off (you hear what you draw). */
+    /** After an edit: the shown slot (the one on) changed. */
     void store (const TimeSlot& slot);
     juce::String slotTitle() const;   // "SLOT 01  HALF TIME  (EDITED)" in the header
     void placeReset();
@@ -80,8 +77,8 @@ private:
     IdleGate idle; // rests while nothing moves
 };
 
-/** The TIME slots as cards (a mini picture of each curve). Click: switch that slot on; the
-    active one again: off, its curves reset. Right-click: a menu. */
+/** The TIME slots as cards (a mini picture of each curve). Click: that slot selected (on);
+    the selected one again: deselected, its curves reset. Right-click: a menu. */
 class TimeSlots final : public juce::Component, private AnimationClock::Client
 {
 public:
@@ -97,7 +94,7 @@ public:
     std::function<void (int)> onBankChanged; // it switched by itself (a slot in another bank came on)
 
     void mouseDown (const juce::MouseEvent&) override;
-    /** A click on slot `k`: on (and shown); the active one again: off, its curves reset. */
+    /** A click on slot `k`: selected (on); the selected one again: deselected, its curves reset. */
     void clickSlot (int k);
 
 private:
@@ -107,7 +104,7 @@ private:
 
     KerfAudioProcessor& processor;
     AnimationClock& clock;
-    int hovered = -1, shownActive = -2, shownEdit = -2;
+    int hovered = -1, shownActive = -2;
     int bank = 0;
     std::array<float, TimeFactory::numSlots> glow {};
     juce::String lastSignature;

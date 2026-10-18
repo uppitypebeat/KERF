@@ -70,7 +70,7 @@ public:
     void mouseMagnify (const juce::MouseEvent&, float scaleFactor) override;
 
 private:
-    enum class DragMode { none, edge, pan, overview, overviewLeft, overviewRight, playhead };
+    enum class DragMode { none, edge, pan, overview, overviewLeft, overviewRight, playhead, box };
 
     struct EdgeHit { int chopId = 0; ChopEdge edge = ChopEdge::start; };
 
@@ -153,6 +153,14 @@ private:
     juce::String dragSnapKind;
     double panStartViewStart = 0.0;
     float panStartX = 0.0f;
+    // Ctrl + drag: a box over the chops to select (its start kept as a frame, so the view can scroll).
+    double boxStartFrame = 0.0;
+    float boxStartY = 0.0f;
+    int boxPressedChop = 0;        // the chop under the Ctrl + click (a click without a drag: it toggles)
+    bool boxDrawn = false;         // dragged far enough to be a box
+    juce::Rectangle<float> boxBounds() const;
+    void applyBox();
+    void paintBox (juce::Graphics&);
     juce::Point<float> mousePos;
 
     std::optional<EdgeHit> hoverEdge;

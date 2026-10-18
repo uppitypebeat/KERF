@@ -354,7 +354,7 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
         // TIME page: the slots as cards over all the width there is; MIX with the cycle
         // stacked beside it at the right (compact, like the FX knobs).
         { "SLOTS", [this] { const auto a = (int) processor.getParameters().getRawParameterValue (Params::timeSlot)->load();
-                            return a > 0 ? "ON  " + juce::String (TimeFactory::name (a - 1)) : juce::String ("OFF  -  CLICK A SLOT OR DRAW"); },
+                            return a > 0 ? juce::String (TimeFactory::name (a - 1)) + "  -  CLICK AGAIN: DESELECT" : juce::String ("NONE  -  CLICK A SLOT"); },
           4, { &timeSlots, &timeBank }, 0, 0.0f,
           [this] (juce::Rectangle<float> c, int)
           {
