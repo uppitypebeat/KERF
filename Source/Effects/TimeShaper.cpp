@@ -80,7 +80,7 @@ namespace TimeFactory
         // The order the slots are built in below (the shapes refer to each other by it).
         const char* const builtNames[numSlots] = { "HALF TIME", "TAPE STOP", "SPIN UP", "STUTTER 8", "STUTTER 16", "REVERSE",
                                                    "SCRATCH", "SLOW DOWN", "BEAT REPEAT", "DRAG", "GATE 16", "SIDECHAIN",
-                                                   "STUTTER 3", "ROLL", "REWIND", "WARBLE", "GLITCH", "GATE 332", "SWELL", "CUSTOM",
+                                                   "STUTTER 3", "ROLL", "REWIND", "WARBLE", "GLITCH", "GATE 332", "SWELL", "PUMP 4",
                                                    "HALF FIRST", "SLOWMO", "QUARTER", "STUTTER 4", "STUTTER 32", "ROLL DOWN", "ROLL 3", "FILL 16", "BOUNCE", "REVERSE 8",
                                                    "REV HALF", "ECHO BEAT", "REPEAT 2", "DOTTED", "POLY 3", "SHUFFLE", "LAZY", "BRAKE", "STOP START", "SPINBACK",
                                                    "WOW", "FLUTTER", "SCRATCH 8", "GATE 8", "GATE 4", "GATE 3", "GATE DOT", "OFFBEAT", "TRANCE 16", "PUMP 8",
@@ -96,7 +96,7 @@ namespace TimeFactory
             "REPEAT 2", "ECHO BEAT", "DOTTED", "POLY 3", "BOUNCE", "SCRATCH", "SCRATCH 8", "GLITCH", "BUILD UP", "STUTTER FADE",
             // C: gates and volume
             "GATE 16", "GATE 8", "GATE 4", "GATE 3", "GATE DOT", "GATE 332", "OFFBEAT", "TRANCE 16", "HALF GATE", "SIDECHAIN",
-            "PUMP 8", "TREMOLO", "BREATHE", "SWELL", "REV SWELL", "RISE", "DROP", "ECHO", "TAPE FADE", "CUSTOM" };
+            "PUMP 8", "TREMOLO", "BREATHE", "SWELL", "REV SWELL", "RISE", "DROP", "ECHO", "TAPE FADE", "PUMP 4" };
 
         int builtIndex (const char* name)
         {
@@ -377,8 +377,17 @@ namespace TimeFactory
             s[59].time = s[13].time;
             s[59].volume = {}; at (s[59].volume, 0.0f, 1.4f); at (s[59].volume, 4.0f, 4.0f);
 
-            // CUSTOM: live and full volume, to draw your own.
-            s[(size_t) builtIndex ("CUSTOM")] = TimeSlot {};
+            // PUMP 4: sidechain ducking on every beat (deeper and slower than PUMP 8).
+            {
+                auto& pump = s[(size_t) builtIndex ("PUMP 4")];
+                at (pump.time, 0.0f, 0.0f); at (pump.time, 4.0f, 0.0f);
+                pump.volume = {};
+                for (int k = 0; k < 4; ++k)
+                {
+                    const auto b = (float) k;
+                    at (pump.volume, b, 0.0f); at (pump.volume, b + 0.08f, 0.4f); at (pump.volume, b + 0.4f, 2.6f); at (pump.volume, b + 1.0f, 4.0f);
+                }
+            }
 
             for (auto& slot : s) { slot.time.sort(); slot.volume.sort(); }
             return s;

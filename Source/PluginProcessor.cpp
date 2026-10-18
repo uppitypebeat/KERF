@@ -471,6 +471,12 @@ void KerfAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int sta
                                grainScratch.getWritePointer (0), grainScratch.getWritePointer (1) };
     // Pattern: follows the host transport while it plays, otherwise its own preview clock.
     // PUMP follows the same beat: the host's, the pattern preview's, or its own clock.
+    // Playback starting here (a chop, the sample, the pattern - nothing played before): the
+    // PUMP's own clock starts its cycle from the top (and the FX picture with it).
+    const auto playingNow = transport.isPlaying || p.patternPlay->load (std::memory_order_relaxed) > 0.5f || engine.getNumActiveVoices() > 0;
+    if (playingNow && ! wasPlayingAnything && ! transport.isPlaying)
+        pumpFreePpq = 0.0;
+    wasPlayingAnything = playingNow;
     auto pumpPpq = transport.isPlaying ? chunkTransport.ppqAtBlockStart : pumpFreePpq;
     if (audioSnapshot != nullptr)
     {
@@ -2810,18 +2816,16 @@ void KerfAudioProcessor::resetTimeSlot (int index)
     }
 }
 
-void KerfAudioProcessor::resetTimeSettings (int slot)
+void KerfAudioProcessor::switchTimeSlotOff (int slot)
 {
-    undoManager.beginNewTransaction ("Reset TIME");
+    undoManager.beginNewTransaction ("TIME off");
     auto slots = settings.getChildWithName (timeSlotsId);
     if (const auto edited = slots.getChildWithProperty ("index", slot); edited.isValid())
         slots.removeChild (edited, &undoManager);
     {
-        const ParamUndoGroup group (*this, "Reset TIME");
+        const ParamUndoGroup group (*this, "TIME off");
         paramGroupStarted = true; // record into the transaction begun above
-        for (const auto* id : { Params::timeMix, Params::timeLength })
-            if (auto* param = parameters.getParameter (id); param != nullptr && std::abs (param->getValue() - param->getDefaultValue()) > 1.0e-6f)
-                setParameterAsGesture (id, param->convertFrom0to1 (param->getDefaultValue()));
+        setParameterAsGesture (Params::timeSlot, 0.0f);
     }
     undoManager.beginNewTransaction();
     sendChangeMessage();

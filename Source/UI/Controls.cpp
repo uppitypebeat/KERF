@@ -214,9 +214,9 @@ void Knob::mouseDrag (const juce::MouseEvent& e)
     const auto pixelsForFullRange = e.mods.isShiftDown() ? 1200.0 : juce::jlimit (220.0, 480.0, steps * 8.0);
 
     // The default and the marks click in the same way at any speed: the knob rests on one
-    // for 16 px of travel, then goes on exactly where the mouse is (no jump, nothing lost).
+    // for 22 px of travel, then goes on exactly where the mouse is (no jump, nothing lost).
     // Shift: no detents (fine adjustment).
-    const auto zoneNow = e.mods.isShiftDown() ? 0.0 : 16.0 / pixelsForFullRange;
+    const auto zoneNow = e.mods.isShiftDown() ? 0.0 : 22.0 / pixelsForFullRange;
     if (! rawValid || zoneNow != zone)
     {
         zone = zoneNow;

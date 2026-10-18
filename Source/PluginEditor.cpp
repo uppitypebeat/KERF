@@ -272,7 +272,9 @@ void MainView::resized()
 
     const auto view = r.reduced (16, 0);
     waveform.setBounds (view);
-    pageOffVeil.setBounds (view.getUnion (controls.getBounds())); // the page: its view and its controls
+    // The page: from its view down to the footer, the same area on every page (the EQ has no
+    // panel: the message would sit higher there).
+    pageOffVeil.setBounds (juce::Rectangle<int>::leftTopRightBottom (0, view.getY(), getWidth(), footer.getY()));
     grainView.setBounds (view);
     fxView.setBounds (view);
     eqView.setBounds (view);

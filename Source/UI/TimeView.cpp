@@ -45,7 +45,7 @@ int timeEditSlot (KerfAudioProcessor& p)
 {
     if (const auto active = activeSlot (p); active >= 0)
         return active;
-    return juce::jlimit (0, TimeFactory::numSlots - 1, (int) p.getSettings().getProperty ("timeEditSlot", TimeFactory::customSlot));
+    return juce::jlimit (0, TimeFactory::numSlots - 1, (int) p.getSettings().getProperty ("timeEditSlot", 0));
 }
 
 void setTimeEditSlot (KerfAudioProcessor& p, int slot)
@@ -771,14 +771,11 @@ void TimeSlots::mouseDown (const juce::MouseEvent& e)
 
 void TimeSlots::clickSlot (int k)
 {
-    // This slot on (and shown). The active one again: everything on the TIME page back to
-    // how it started - its TIME and VOLUME curves, MIX and the cycle length (it stays on).
+    // This slot on (and shown). The active one again: off, and its TIME and VOLUME curves
+    // back to how they came.
     setTimeEditSlot (processor, k);
     if (activeSlot (processor) == k)
-    {
-        processor.resetTimeSettings (k);
-        processor.setStatusMessage ("TIME reset  -  Ctrl+Z brings your settings back");
-    }
+        processor.switchTimeSlotOff (k);
     else
         processor.setParameterAsGesture (Params::timeSlot, (float) (k + 1));
 }

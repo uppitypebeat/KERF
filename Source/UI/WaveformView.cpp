@@ -1197,6 +1197,8 @@ void WaveformView::paintWaveform (juce::Graphics& g)
     const auto& wf = *info.waveform;
     const auto& audio = shownSample->audio;
     const auto selected = selectedChopId();
+    const auto picked = processor.getSelectedChops(); // every selected chop is drawn bright (the one shown and the others)
+    auto isPicked = [&picked] (int id) { return std::find (picked.begin(), picked.end(), id) != picked.end(); };
 
     // Auto-gain so quiet samples are still readable (max 4x).
     const auto gain = juce::jlimit (1.0f, 4.0f, 0.92f / std::max (0.0001f, wf.getPeak()));
@@ -1266,7 +1268,7 @@ void WaveformView::paintWaveform (juce::Graphics& g)
                 heat = std::max (heat, frac * frac * t.level);
         }
 
-        // Every chop in its own colour; the selected one brightest. What is playing heats up
+        // Every chop in its own colour; the selected ones brightest. What is playing heats up
         // towards white behind the playhead.
         juce::Colour peakColour, rmsColour;
         if (owner != 0 && owner != lastColourOwner)
@@ -1274,7 +1276,7 @@ void WaveformView::paintWaveform (juce::Graphics& g)
             lastColourOwner = owner;
             ownerColour = colourOf (owner);
         }
-        if (owner != 0 && owner == selected)
+        if (owner != 0 && isPicked (owner))
         {
             peakColour = ownerColour.withAlpha (0.55f + 0.35f * heat);
             rmsColour = ownerColour.brighter (0.25f).interpolatedWith (Screen::ink(), 0.5f * heat);

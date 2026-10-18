@@ -37,10 +37,9 @@ namespace TimeFactory
 {
     constexpr int numSlots = 60;     // three banks of 20: A tempo and tape, B repeats and stutters, C gates and volume
     constexpr int slotsPerBank = 20;
-    constexpr int customSlot = 59; // CUSTOM: starts live (flat), shown first, to draw your own (the last slot)
     /** The factory shapes in page order: bank A tempo and tape (HALF TIME ... REV HALF), bank B
         repeats and stutters (STUTTER 3 ... STUTTER FADE), bank C gates and volume (GATE 16 ...
-        TAPE FADE) and CUSTOM (flat) last. */
+        PUMP 4). Every slot can be drawn over (it keeps your curves until reset). */
     const std::array<TimeSlot, numSlots>& slots();
     const char* name (int slot);
 }

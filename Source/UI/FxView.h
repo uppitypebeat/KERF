@@ -72,7 +72,8 @@ private:
     float level = 0.0f;   // output level (smoothed)
     float sample = 0.0f;  // latest output sample (for the DIRT transfer dot)
     double time = 0.0;
-    double motion = 0.0;   // WOBBLE's clock: runs only while something plays
+    double motion = 0.0;   // WOBBLE's clock: runs only while something plays (from 0 at each start)
+    bool wasPlaying = false;
     IdleGate idle; // rests while nothing moves
     double pumpPpq = 0.0;  // the beat the PUMP follows
     float pumpGain = 1.0f; // its level right now (0..1)

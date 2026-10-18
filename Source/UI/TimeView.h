@@ -81,7 +81,7 @@ private:
 };
 
 /** The TIME slots as cards (a mini picture of each curve). Click: switch that slot on; the
-    active one again: the TIME page back to how it started. Right-click: a menu. */
+    active one again: off, its curves reset. Right-click: a menu. */
 class TimeSlots final : public juce::Component, private AnimationClock::Client
 {
 public:
@@ -97,7 +97,7 @@ public:
     std::function<void (int)> onBankChanged; // it switched by itself (a slot in another bank came on)
 
     void mouseDown (const juce::MouseEvent&) override;
-    /** A click on slot `k`: on (and shown); the active one again: the TIME page reset. */
+    /** A click on slot `k`: on (and shown); the active one again: off, its curves reset. */
     void clickSlot (int k);
 
 private:

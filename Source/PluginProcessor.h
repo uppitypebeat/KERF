@@ -254,9 +254,9 @@ public:
     kerf::TimeSlot getTimeSlot (int index) const;                 // edited, or the factory shape
     void setTimeSlot (int index, const kerf::TimeSlot& slot);     // one undo step per gesture (the caller begins it)
     void resetTimeSlot (int index);                               // back to the factory shape (undoable)
-    /** The TIME page back to how it started: the slot's TIME and VOLUME curves, MIX and the
-        cycle length. One undo step. */
-    void resetTimeSettings (int slot);
+    /** The active slot clicked again: TIME off (no slot), and that slot's TIME and VOLUME curves
+        back to how they came. One undo step. */
+    void switchTimeSlotOff (int slot);
     bool isTimeSlotEdited (int index) const;
     double getTimeCycleBeats() const noexcept;                    // 2, 4 or 8
     const kerf::TimeShaper& getTimeShaper() const noexcept { return timeShaper; }
@@ -437,6 +437,7 @@ private:
     kerf::TimeShaper timeShaper;
     kerf::Metronome metronome;                 // the toolbar's click (after CAPTURE: heard, never recorded)
     double pumpFreePpq = 0.0; // audio thread: the PUMP clock while nothing else runs
+    bool wasPlayingAnything = false; // audio thread: something played in the last chunk
     kerf::SpectrumAnalyzer spectrum;
     kerf::OutputTap outputTap;
     kerf::PatternPlayer patternPlayer;
