@@ -145,6 +145,8 @@ struct EngineSnapshot final : public juce::ReferenceCountedObject
     PatternData pattern;
 
     std::array<TimeSlot, TimeFactory::numSlots> timeSlots {}; // TIME: the curves of every slot
+    TimeSlot ownTime;             // TIME: your own curves (no preset selected)
+    bool ownTimeOn = false;       // drawn (not flat): they play
 
     EngineSnapshot() { chopIndexForNote.fill (-1); }
 

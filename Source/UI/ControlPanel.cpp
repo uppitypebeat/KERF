@@ -215,7 +215,7 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
     attachChoice (timeLength, Params::timeLength);
     timeLength.setTooltip ("Length of one TIME cycle");
     addAndMakeVisible (timeBank);
-    timeBank.setTooltip ("Slot banks A, B and C");
+    timeBank.setTooltip ("Preset banks A, B and C");
     timeBank.onChange = [this] (int b) { timeSlots.setBank (b); };
     timeSlots.onBankChanged = [this] (int b) { timeBank.setSelected (b, juce::dontSendNotification); };
 
@@ -353,8 +353,8 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
 
         // TIME page: the slots as cards over all the width there is; MIX with the cycle
         // stacked beside it at the right (compact, like the FX knobs).
-        { "SLOTS", [this] { const auto a = (int) processor.getParameters().getRawParameterValue (Params::timeSlot)->load();
-                            return a > 0 ? juce::String (TimeFactory::name (a - 1)) + "  -  CLICK AGAIN: DESELECT" : juce::String ("NONE  -  CLICK A SLOT"); },
+        { "PRESETS", [this] { const auto a = (int) processor.getParameters().getRawParameterValue (Params::timeSlot)->load();
+                            return a > 0 ? juce::String (TimeFactory::name (a - 1)) + "  -  CLICK AGAIN: DESELECT" : (processor.isTimeSlotEdited (KerfAudioProcessor::ownTimeCurves) ? juce::String ("NONE  -  YOUR OWN CURVES PLAY") : juce::String ("NONE  -  CLICK ONE, OR DRAW ABOVE")); },
           4, { &timeSlots, &timeBank }, 0, 0.0f,
           [this] (juce::Rectangle<float> c, int)
           {
@@ -670,7 +670,7 @@ bool ControlPanel::isPageActive (int pg) const
                      || std::abs (value (Params::filter)) > 0.005f || value (Params::pump) > 0.001f;
         case 2:  return value (Params::grainMix) > 0.001f;
         case 3:  return ! processor.eqSettings().isFlat();
-        case 4:  return value (Params::timeSlot) > 0.5f && value (Params::timeMix) > 0.001f;
+        case 4:  return processor.isTimeOn() && value (Params::timeMix) > 0.001f;
         default: return false;
     }
 }

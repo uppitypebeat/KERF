@@ -12,7 +12,8 @@ namespace kerf::ui
     fast the tape runs there: normal, slower, backwards) and its VOLUME curve under it, both
     editable: click to add a point, drag to move it, double-click to remove it, right-click
     for more; snapped to the grid (Shift: free). A beam follows the beat. They show the slot
-    that is on; with none, the factory setting (live, full volume), not editable.
+    that is on; with none, your own curves (flat until you draw;
+    drawn, they play).
 
     Right, TAPE: two reels turning at the speed playback runs (slowing to a stop, running
     backwards), and SPEED, the last seconds of that speed as a scrolling trace. */
@@ -50,7 +51,7 @@ private:
     int laneAt (juce::Point<float> p) const;
     TimeCurve& curveOf (TimeSlot& slot, int lane) const { return lane == timeLane ? slot.time : slot.volume; }
     void showMenu (int lane);
-    /** After an edit: the shown slot (the one on) changed. */
+    /** After an edit: the curves shown (the preset selected, or your own) changed. */
     void store (const TimeSlot& slot);
     juce::String slotTitle() const;   // "SLOT 01  HALF TIME  (EDITED)" in the header
     void placeReset();
@@ -77,7 +78,7 @@ private:
     IdleGate idle; // rests while nothing moves
 };
 
-/** The TIME slots as cards (a mini picture of each curve). Click: that slot selected (on);
+/** The TIME presets as cards (a mini picture of each curve). Click: that slot selected (on);
     the selected one again: deselected, its curves reset. Right-click: a menu. */
 class TimeSlots final : public juce::Component, private AnimationClock::Client
 {

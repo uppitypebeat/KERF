@@ -562,10 +562,16 @@ void KerfAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int sta
     // --- TIME ----------------------------------------------------------------------
     // Last in the chain (a tape stop slows the echoes too), on the same beat as PUMP.
     {
-        const auto slot = p.timeOff->load() > 0.5f ? 0 : (int) p.timeSlot->load();
+        const auto tabOff = p.timeOff->load() > 0.5f;
+        const auto slot = tabOff ? 0 : (int) p.timeSlot->load();
+        // A preset, or (none selected) your own curves when drawn.
+        const TimeSlot* curves = nullptr;
+        if (audioSnapshot != nullptr && ! tabOff)
+            curves = slot > 0 ? &audioSnapshot->timeSlots[(size_t) juce::jlimit (1, TimeFactory::numSlots, slot) - 1]
+                              : (audioSnapshot->ownTimeOn ? &audioSnapshot->ownTime : nullptr);
         // The screen's playhead runs with the song or the pattern preview and, stopped,
         // stands where the host is (the audio clock runs on for live playing).
-        const TimeShaper::Settings ts { slot > 0 && audioSnapshot != nullptr ? &audioSnapshot->timeSlots[(size_t) juce::jlimit (1, TimeFactory::numSlots, slot) - 1] : nullptr,
+        const TimeShaper::Settings ts { curves,
                                         p.timeMix->load(), getTimeCycleBeats(),
                                         transport.isPlaying || lastPatternRun, chunkTransport.ppqAtBlockStart };
         timeShaper.process (view, num, ts, pumpPpq, fallbackTempo);
@@ -712,6 +718,8 @@ void KerfAudioProcessor::publishSnapshot()
     // TIME: every slot's curves (edited ones from the settings).
     for (int k = 0; k < TimeFactory::numSlots; ++k)
         s->timeSlots[(size_t) k] = getTimeSlot (k);
+    s->ownTime = getTimeSlot (ownTimeCurves);
+    s->ownTimeOn = isTimeSlotEdited (ownTimeCurves);
 
     // Stretch mode: attach renders that match the current settings exactly.
     s->stretchMode = p.stretchMode->load() > 0.5f;
@@ -1274,10 +1282,11 @@ void KerfAudioProcessor::renderAsync (const juce::File& target, int bitDepth, in
     job->eq = p.eqOff->load() < 0.5f ? eqSettings().heard() : EqProcessor::Settings {};
     job->pump = fxOn ? pumpSettings() : PumpProcessor::Settings { 0.0f, pumpSettings().mode };
     job->groove = groove();
-    if (const auto slot = (int) p.timeSlot->load(); slot > 0 && p.timeOff->load() < 0.5f)
+    if (isTimeOn())
     {
+        const auto slot = (int) p.timeSlot->load();
         job->timeOn = true;
-        job->timeSlot = getTimeSlot (slot - 1);
+        job->timeSlot = getTimeSlot (slot > 0 ? slot - 1 : ownTimeCurves);
         job->timeMix = p.timeMix->load();
         job->timeCycle = getTimeCycleBeats();
     }
@@ -2768,10 +2777,10 @@ bool KerfAudioProcessor::affectsEngine (const juce::ValueTree& tree) const
 
 kerf::TimeSlot KerfAudioProcessor::getTimeSlot (int index) const
 {
-    index = juce::jlimit (0, TimeFactory::numSlots - 1, index);
+    index = juce::jlimit (ownTimeCurves, TimeFactory::numSlots - 1, index);
     const auto edited = settings.getChildWithName (timeSlotsId).getChildWithProperty ("index", index);
     if (! edited.isValid())
-        return TimeFactory::slots()[(size_t) index];
+        return index == ownTimeCurves ? TimeSlot {} : TimeFactory::slots()[(size_t) index]; // (own: flat)
     TimeSlot slot;
     slot.time = TimeCurve::fromString (edited.getProperty ("time").toString());
     slot.volume = TimeCurve::fromString (edited.getProperty ("volume").toString());
@@ -2785,10 +2794,24 @@ bool KerfAudioProcessor::isTimeSlotEdited (int index) const
     return settings.getChildWithName (timeSlotsId).getChildWithProperty ("index", index).isValid();
 }
 
+bool KerfAudioProcessor::isTimeOn() const
+{
+    if (parameters.getRawParameterValue (Params::timeOff)->load() > 0.5f)
+        return false;
+    return parameters.getRawParameterValue (Params::timeSlot)->load() > 0.5f || isTimeSlotEdited (ownTimeCurves);
+}
+
 void KerfAudioProcessor::setTimeSlot (int index, const kerf::TimeSlot& slot)
 {
-    index = juce::jlimit (0, TimeFactory::numSlots - 1, index);
+    index = juce::jlimit (ownTimeCurves, TimeFactory::numSlots - 1, index);
     auto slots = settings.getChildWithName (timeSlotsId);
+    if (index == ownTimeCurves && slot.time == TimeSlot{}.time && slot.volume == TimeSlot{}.volume)
+    {
+        // Your own curves flat again: nothing drawn, TIME silent.
+        if (const auto own = slots.getChildWithProperty ("index", index); own.isValid())
+            slots.removeChild (own, &undoManager);
+        return;
+    }
     if (! slots.isValid())
     {
         slots = juce::ValueTree (timeSlotsId);

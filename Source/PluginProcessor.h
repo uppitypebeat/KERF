@@ -250,7 +250,9 @@ public:
     void stepPreset (int direction);
     /** "Default" until a preset is loaded (projects from before 0.5 say "Init" for it). */
     juce::String getPresetName() const { const auto n = settings.getProperty ("presetName", "Default").toString(); return n == "Init" ? juce::String ("Default") : n; }
-    // TIME (the page after EQ): 12 slots of curves, kept with the project; edits are undoable.
+    // TIME (the page after EQ): 60 presets of curves, kept with the project; edits are undoable.
+    // Index ownTimeCurves (-1): your own curves, drawn with no preset selected (they play then).
+    static constexpr int ownTimeCurves = -1;
     kerf::TimeSlot getTimeSlot (int index) const;                 // edited, or the factory shape
     void setTimeSlot (int index, const kerf::TimeSlot& slot);     // one undo step per gesture (the caller begins it)
     void resetTimeSlot (int index);                               // back to the factory shape (undoable)
@@ -258,6 +260,8 @@ public:
         back to how they came. One undo step. */
     void switchTimeSlotOff (int slot);
     bool isTimeSlotEdited (int index) const;
+    /** TIME plays: a preset selected, or (none selected) your own curves drawn; not with the tab off. */
+    bool isTimeOn() const;
     double getTimeCycleBeats() const noexcept;                    // 2, 4 or 8
     const kerf::TimeShaper& getTimeShaper() const noexcept { return timeShaper; }
     /** Counts every parameter change (automation too): views rest while it stands still. */
