@@ -66,6 +66,54 @@ float textWidth (const juce::String& text, TextStyle style)
 }
 
 //==============================================================================
+namespace Face
+{
+    void key (juce::Graphics& g, juce::Rectangle<float> r, const State& s)
+    {
+        // Flat: no fill at rest, just a fine outline; on, a light wash of the accent.
+        const auto signal = s.signal.isTransparent() ? Colours::accent : s.signal;
+        const auto rad = std::min (radius, r.getHeight() * 0.3f);
+
+        if (! s.enabled)
+        {
+            g.setColour (Colours::hairline);
+            g.drawRoundedRectangle (r, rad, Metrics::hairline);
+            return;
+        }
+        if (s.on)
+        {
+            g.setColour (signal.withAlpha (s.down ? 0.24f : (s.hover ? 0.2f : 0.15f)));
+            g.fillRoundedRectangle (r, rad);
+            g.setColour (signal.withAlpha (s.hover ? 0.9f : 0.6f));
+            g.drawRoundedRectangle (r, rad, Metrics::hairline);
+            return;
+        }
+        if (s.hover || s.down)
+        {
+            g.setColour (Colours::text.withAlpha (s.down ? 0.08f : 0.04f));
+            g.fillRoundedRectangle (r, rad);
+        }
+        g.setColour (s.hover ? Colours::line.interpolatedWith (Colours::text, 0.25f) : Colours::line);
+        g.drawRoundedRectangle (r, rad, Metrics::hairline);
+    }
+
+    void track (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        // Just the outline around a row of options.
+        g.setColour (Colours::line);
+        g.drawRoundedRectangle (r, std::min (radius, r.getHeight() * 0.3f), Metrics::hairline);
+    }
+
+    juce::Colour text (const State& s)
+    {
+        const auto signal = s.signal.isTransparent() ? Colours::accent : s.signal;
+        if (! s.enabled) return Colours::textFaint;
+        if (s.on)        return inkColour (signal, 0.35f);
+        return s.hover ? Colours::text : Colours::textDim;
+    }
+}
+
+//==============================================================================
 //==============================================================================
 const std::vector<Palette>& palettes()
 {
@@ -118,9 +166,55 @@ bool nebulaTheme()
     return palettes()[(size_t) activePalette].nebula;
 }
 
+namespace { bool screenColours = false; } // a ScreenScope is painting a screen
+
 bool lightTheme()
 {
-    return palettes()[(size_t) activePalette].light;
+    return palettes()[(size_t) activePalette].light && ! screenColours;
+}
+
+ScreenScope::ScreenScope()
+{
+    if (screenColours || ! palettes()[(size_t) activePalette].light)
+        return;
+    active = true;
+    screenColours = true;
+    juce::Colour* tokens[] = { &Colours::background, &Colours::surface, &Colours::surfaceRaised, &Colours::surfaceHover, &Colours::well,
+                               &Colours::hairline, &Colours::line, &Colours::text, &Colours::textDim, &Colours::textFaint,
+                               &Colours::accent, &Colours::accentSoft, &Colours::record, &Colours::ok };
+    for (size_t i = 0; i < saved.size(); ++i)
+        saved[i] = *tokens[i];
+
+    // The dark sibling: neutral night colours with a breath of the accent, the accent a little
+    // lifted (it was chosen for white).
+    const auto accent = Colours::accent.brighter (0.15f);
+    auto night = [accent] (juce::uint32 argb, float tint) { return juce::Colour (argb).interpolatedWith (accent, tint); };
+    Colours::background    = night (0xff0b0a0d, 0.05f);
+    Colours::surface       = night (0xff141317, 0.05f);
+    Colours::surfaceRaised = night (0xff1b1a1f, 0.05f);
+    Colours::surfaceHover  = night (0xff25242a, 0.05f);
+    Colours::well          = night (0xff08070a, 0.04f);
+    Colours::hairline      = night (0xff252429, 0.06f);
+    Colours::line          = night (0xff36353b, 0.08f);
+    Colours::text          = juce::Colour (0xffece7e4);
+    Colours::textDim       = juce::Colour (0xff8e8a8c);
+    Colours::textFaint     = juce::Colour (0xff5a5858);
+    Colours::accent        = accent;
+    Colours::accentSoft    = accent.withAlpha (0.2f);
+    Colours::record        = juce::Colour (0xffe5484d);
+    Colours::ok            = juce::Colour (0xff8fbf8a);
+}
+
+ScreenScope::~ScreenScope()
+{
+    if (! active)
+        return;
+    juce::Colour* tokens[] = { &Colours::background, &Colours::surface, &Colours::surfaceRaised, &Colours::surfaceHover, &Colours::well,
+                               &Colours::hairline, &Colours::line, &Colours::text, &Colours::textDim, &Colours::textFaint,
+                               &Colours::accent, &Colours::accentSoft, &Colours::record, &Colours::ok };
+    for (size_t i = 0; i < saved.size(); ++i)
+        *tokens[i] = saved[i];
+    screenColours = false;
 }
 
 juce::Colour inkColour (juce::Colour c, float amount)
@@ -173,6 +267,7 @@ void fillBackdrop (juce::Graphics& g, const juce::Component& c, juce::Rectangle<
     {
         g.reduceClipRegion (area.getSmallestIntegerContainer());
     }
+    g.setOpacity (1.0f); // (an image is drawn at the alpha of the colour set last: the sky is opaque)
     g.drawImageAt (image, origin.x, origin.y);
 }
 
@@ -267,7 +362,7 @@ void KerfLookAndFeel::refreshColours()
 
 const juce::Image& KerfLookAndFeel::backdropImage (juce::Point<int> size, Backdrop layer)
 {
-    auto& cache = backdrops[layer == Backdrop::panel ? 0 : 1];
+    auto& cache = backdrops[(layer == Backdrop::panel ? 0 : 1) + (screenColours ? 2 : 0)];
     const auto base = layer == Backdrop::panel ? Colours::background : Colours::well;
     if (cache.image.isValid() && cache.size == size && cache.base == base && cache.accent == Colours::accent && cache.glow == nebulaGlow())
         return cache.image;
@@ -326,7 +421,7 @@ const juce::Image& KerfLookAndFeel::backdropImage (juce::Point<int> size, Backdr
 const juce::Image& KerfLookAndFeel::backdropForDrawing (juce::Point<int> size, Backdrop layer)
 {
     const auto& image = backdropImage (size, layer);
-    auto& cache = backdrops[layer == Backdrop::panel ? 0 : 1];
+    auto& cache = backdrops[(layer == Backdrop::panel ? 0 : 1) + (screenColours ? 2 : 0)];
     if (! cache.native.isValid())
         cache.native = juce::NativeImageType().convert (image);
     return cache.native;

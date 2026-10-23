@@ -256,6 +256,7 @@ void WaveformView::changeListenerCallback (juce::ChangeBroadcaster*)
 //==============================================================================
 void WaveformView::animationTick (double dt)
 {
+    const ScreenScope screenColours; // (colours picked here are the screen's too)
     const auto& info = processor.getSampleInfo();
     bool needsRepaint = false;
 
@@ -645,6 +646,7 @@ int64_t WaveformView::snapFrame (int64_t frame, bool allowSnap, juce::String& sn
 //==============================================================================
 void WaveformView::paint (juce::Graphics& g)
 {
+    const ScreenScope screenColours; // a dark display in every theme
     const auto bounds = getLocalBounds().toFloat();
     if (nebulaTheme())
     {
@@ -1965,30 +1967,21 @@ void WaveformView::mouseMagnify (const juce::MouseEvent& e, float scaleFactor)
 
 void WaveformView::showContextMenu (int64_t frame)
 {
+    // In order of use: the chop's sound, then cutting, then the view, the sample last.
     auto& model = processor.getChops();
     auto& um = processor.getUndoManager();
     const auto selected = selectedChopId();
     const auto chop = processor.getEffectiveChop (selected);
 
     juce::PopupMenu menu;
-    menu.addItem ("Split here", [this, frame, &um]
-    {
-        juce::String kind;
-        um.beginNewTransaction ("Split chop");
-        if (const auto id = splitAtFrame (snapFrame (frame, true, kind)))
-            selectChop (id);
-    });
-
     if (chop.has_value())
     {
-        menu.addItem ("Merge with next", [selected, &model, &um] { um.beginNewTransaction ("Merge chops"); model.mergeWithNext (selected); });
-        menu.addItem ("Delete chop", [this, selected, &model, &um]
-        {
-            um.beginNewTransaction ("Delete chop");
-            model.removeChop (selected);
-            selectChop (model.getNumChops() > 0 ? model.getChops().front().id : 0);
-        });
-        menu.addSeparator();
+        int number = 0;
+        const auto list = model.getChops();
+        for (size_t i = 0; i < list.size(); ++i)
+            if (list[i].id == selected)
+                number = (int) i + 1;
+        menu.addSectionHeader ("CHOP " + juce::String (number).paddedLeft ('0', 2) + "   " + noteName (chop->note));
 
         juce::PopupMenu modes;
         const juce::StringArray modeNames { "One-shot", "Gate", "Loop" };
@@ -2026,12 +2019,25 @@ void WaveformView::showContextMenu (int64_t frame)
         }
         menu.addSubMenu ("MIDI note", notes);
         menu.addSeparator();
-        menu.addItem ("Zoom to chop", [this] { zoomToSelection(); });
     }
 
-    menu.addItem ("Zoom to fit", [this] { zoomToFit(); });
+    menu.addItem ("Split here", [this, frame, &um]
+    {
+        juce::String kind;
+        um.beginNewTransaction ("Split chop");
+        if (const auto id = splitAtFrame (snapFrame (frame, true, kind)))
+            selectChop (id);
+    });
+    if (chop.has_value())
+    {
+        menu.addItem ("Merge with the next chop", [selected, &model, &um] { um.beginNewTransaction ("Merge chops"); model.mergeWithNext (selected); });
+        menu.addItem ("Delete chop", [this] { processor.deleteSelectedChops(); });
+    }
     menu.addSeparator();
-    menu.addItem ("Remap notes by position", [&model, &um] { um.beginNewTransaction ("Remap notes"); model.remapByPosition(); });
+
+    if (chop.has_value())
+        menu.addItem ("Zoom to chop", [this] { zoomToSelection(); });
+    menu.addItem ("Zoom to fit", [this] { zoomToFit(); });
     menu.addSeparator();
     menu.addItem ("Remove the sample from KERF", [this] { processor.unloadSample(); });
 

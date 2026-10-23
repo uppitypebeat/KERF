@@ -163,13 +163,14 @@ void SamplerEngine::process (const VoiceBusses& out, int numSamples, const juce:
         int n = 0;
         if (amount > 0.001f)
         {
-            v.forEachGrainDisplay ([&d, &n] (double pos, float lvl, float semis)
+            v.forEachGrainDisplay ([&d, &n] (double pos, float lvl, float semis, float cents)
             {
                 if (n < VoiceDisplay::maxGrains)
                 {
                     d.grainPosition[(size_t) n].store (pos, std::memory_order_relaxed);
                     d.grainLevel[(size_t) n].store (lvl, std::memory_order_relaxed);
                     d.grainPitch[(size_t) n].store (semis, std::memory_order_relaxed);
+                    d.grainCents[(size_t) n].store (cents, std::memory_order_relaxed);
                     ++n;
                 }
             });

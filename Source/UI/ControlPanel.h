@@ -10,7 +10,7 @@ namespace kerf::ui
 /** The lower control area, one page per main window (the tabs are PageTabs, at the top):
       CHOP:  SAMPLE | ENVELOPE | PITCH | OUTPUT      (the selected chop)
       GRAIN: CLOUD | MOTION | PITCH | COLOUR
-      FX:    SPACE | DIRT | WOBBLE | TONE | PUMP     (global effects)
+      FX:    ECHO | DIRT | WOBBLE | FILTER | PUMP    (global effects)
       EQ:    no panel: the EQ view is edited directly (drag, wheel, right-click)
     Every control is visible on its page (no hidden drawer). Sections are sized to their
     content and the spare width is shared evenly, so nothing floats in empty space. */
@@ -113,16 +113,17 @@ private:
     juce::Rectangle<float> chokeLabel;
 
     // SPACE
-    Knob space { "Space", Knob::Size::hero };
+    Knob space { "Echo", Knob::Size::hero };
     Knob spaceSend { "Send", Knob::Size::small };
 
     // GRAIN (its own page and view)
-    Knob grainMix { "Texture" }, grainDensity { "Density" }, grainSize { "Size" }, grainShape { "Shape" };
+    Knob grainMix { "Grains" }, grainDensity { "Density" }, grainSize { "Size" }, grainShape { "Shape" };
     PillButton grainSync { "Sync", true }, grainFreeze { "Freeze", true };
     Segmented grainScale { { "FREE", "OCT", "5TH", "CHORD" } };
-    Knob grainScan { "Scan" }, grainPosition { "Position" }, grainSpray { "Spray" }, grainDrift { "Drift" };
+    Knob grainScan { "Speed" }, grainPosition { "Position" }, grainSpray { "Spray" }, grainDrift { "Drift" };
     Knob grainPitchShift { "Pitch", Knob::Size::large, true }, grainPitch { "Random" }, grainShimmer { "Shimmer" };
-    Knob grainSpread { "Spread" }, grainReverse { "Reverse" }, grainSend { "Send" };
+    Knob grainDetune { "Detune" }, grainGlide { "Glide", Knob::Size::large, true }, grainHaze { "Haze" };
+    Knob grainSpread { "Spread" }, grainReverse { "Reverse" }, grainSend { "Chop Amt" };
 
 
     // DIRT, WOBBLE

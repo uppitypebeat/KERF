@@ -449,23 +449,26 @@ void IconButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
     constexpr auto pi = juce::MathConstants<float>::pi; // (constexpr: the icons' constexpr angles use it)
 
     const auto danger = dangerOnHover && highlighted && enabled; // e.g. delete every chop: red under the mouse
-    const auto bg = on ? Colours::background.overlaidWith (signal.withAlpha (0.16f))
-                       : (danger ? Colours::background.overlaidWith (Colours::record.withAlpha (down ? 0.32f : 0.2f))
-                                 : (highlighted && enabled ? Colours::surfaceHover : Colours::surfaceRaised));
-    g.setColour (bg);
-    g.fillRoundedRectangle (r, Metrics::radiusSmall);
-    g.setColour (on ? signal.withAlpha (0.75f) : (danger ? Colours::record : Colours::line));
-    g.drawRoundedRectangle (r, Metrics::radiusSmall, danger ? 1.2f : Metrics::hairline);
+    // The shared key face (lit when on); a destructive one turns red under the mouse.
+    Face::State face;
+    face.enabled = enabled;
+    face.hover = highlighted && enabled;
+    face.down = down && enabled;
+    face.on = on || danger;
+    face.signal = danger ? Colours::record : signal;
+    Face::key (g, r, face);
+    // (about the colour behind the symbol: symbols cut gaps with it)
+    const auto bg = face.on ? Colours::background.overlaidWith (face.signal.withAlpha (0.15f)) : Colours::background;
 
     if (attention > 0.0f) // drawing the eye (e.g. an update is out): an accent glow that pulses
     {
         g.setColour (Colours::accent.withAlpha (0.18f * attention));
-        g.fillRoundedRectangle (r, Metrics::radiusSmall);
+        g.fillRoundedRectangle (r, Face::radius);
         g.setColour (Colours::accent.withAlpha (attention));
-        g.drawRoundedRectangle (r, Metrics::radiusSmall, 1.4f);
+        g.drawRoundedRectangle (r, Face::radius, 1.4f);
     }
 
-    auto fg = ! enabled ? Colours::textFaint : (on ? signal : (danger ? Colours::record : (highlighted ? Colours::text : Colours::textDim)));
+    auto fg = Face::text (face);
     if (attention > 0.0f && enabled)
         fg = fg.interpolatedWith (Colours::accent, attention);
 
@@ -532,21 +535,6 @@ void IconButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
             // A filled circle (record).
             g.setColour (on ? signal : (enabled ? Colours::record.withAlpha (highlighted ? 1.0f : 0.85f) : Colours::textFaint));
             g.fillEllipse (juce::Rectangle<float> (9.0f, 9.0f).withCentre ({ 8.0f, 8.0f }).transformedBy (toBox));
-            break;
-        }
-
-        case Icon::capture:
-        {
-            // Viewfinder corners around a dot: "grab what KERF is playing".
-            juce::Path corners;
-            const float a = 1.5f, b = 14.5f, l = 4.0f;
-            corners.startNewSubPath (a, a + l); corners.lineTo (a, a); corners.lineTo (a + l, a);
-            corners.startNewSubPath (b - l, a); corners.lineTo (b, a); corners.lineTo (b, a + l);
-            corners.startNewSubPath (b, b - l); corners.lineTo (b, b); corners.lineTo (b - l, b);
-            corners.startNewSubPath (a + l, b); corners.lineTo (a, b); corners.lineTo (a, b - l);
-            g.strokePath (corners, line, toBox);
-            g.setColour (on ? signal : (enabled ? Colours::record.withAlpha (0.85f) : Colours::textFaint));
-            g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ 8.0f, 8.0f }).transformedBy (toBox));
             break;
         }
 
@@ -731,52 +719,23 @@ int PillButton::getIdealWidth() const
 
 void PillButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
 {
-    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    const auto r = getLocalBounds().toFloat().reduced (0.5f);
     const auto on = getToggleState();
     const auto enabled = isEnabled();
-    const auto signal = recordStyle ? Colours::record : Colours::accent;
 
-    juce::Colour bg = Colours::surfaceRaised, border = Colours::line, fg = Colours::textDim;
-
-    if (primary)
-    {
-        // Filled accent with the background colour as text: unmistakably "the" action.
-        const auto fill = ! enabled ? Colours::surfaceRaised
-                        : (down ? Colours::accent.darker (0.15f) : (highlighted ? Colours::accent.brighter (0.12f) : Colours::accent));
-        g.setColour (fill);
-        g.fillRoundedRectangle (r, Metrics::radiusSmall);
-        if (! enabled)
-        {
-            g.setColour (Colours::hairline);
-            g.drawRoundedRectangle (r, Metrics::radiusSmall, Metrics::hairline);
-        }
-        drawText (g, getButtonText().toUpperCase(), r, TextStyle::label, enabled ? Colours::background : Colours::textFaint,
-                  juce::Justification::centred);
-        return;
-    }
-
-
-    if (on && accentWhenOn)
-    {
-        bg = signal.withAlpha (0.14f);
-        border = signal.withAlpha (0.7f);
-        fg = signal;
-    }
-    else if (on)
-    {
-        bg = Colours::surfaceHover;
-        fg = Colours::text;
-    }
-
-    if (highlighted && enabled) { bg = bg.brighter (0.08f); fg = on ? fg : Colours::text; }
-    if (down && enabled)        bg = bg.darker (0.2f);
-    if (! enabled)              { fg = Colours::textFaint; border = Colours::hairline; }
-
-    g.setColour (bg);
-    g.fillRoundedRectangle (r, Metrics::radiusSmall);
-    g.setColour (border);
-    g.drawRoundedRectangle (r, Metrics::radiusSmall, Metrics::hairline);
-    drawText (g, getButtonText().toUpperCase(), r, TextStyle::label, fg, juce::Justification::centred);
+    // The shared key face: lit in the accent (or the record colour) when on; a primary
+    // button (the main action in a group) is always lit.
+    Face::State s;
+    s.enabled = enabled;
+    s.hover = highlighted && enabled;
+    s.down = down && enabled;
+    s.on = primary || (on && accentWhenOn);
+    s.signal = recordStyle ? Colours::record : Colours::accent;
+    if (on && ! accentWhenOn)
+        s.hover = true; // on without the accent: a brighter key
+    Face::key (g, r, s);
+    drawText (g, getButtonText().toUpperCase(), r, TextStyle::label, on && ! accentWhenOn ? Colours::text : Face::text (s),
+              juce::Justification::centred);
 }
 
 //==============================================================================
@@ -826,38 +785,38 @@ int Segmented::indexAt (juce::Point<int> p) const
 
 void Segmented::paint (juce::Graphics& g)
 {
-    const auto r = getLocalBounds().toFloat();
-    g.setColour (Colours::surfaceRaised);
-    g.fillRoundedRectangle (r.reduced (0.5f), Metrics::radiusSmall);
-    g.setColour (Colours::line);
-    g.drawRoundedRectangle (r.reduced (0.5f), Metrics::radiusSmall, Metrics::hairline);
+    // The options in a recessed track; the chosen one a lit key in it, the one under the
+    // mouse a faint key.
+    const auto r = getLocalBounds().toFloat().reduced (0.5f);
+    Face::track (g, r);
+    const auto enabled = isEnabled();
 
     for (int i = 0; i < options.size(); ++i)
     {
         const auto cell = cellBounds (i);
-        const auto w = cell.getWidth(), h = cell.getHeight();
+        const bool isSel = i == selected, isHover = i == hovered && enabled;
 
-        // Separators: left edge inside a row, top edge between rows.
-        if (cell.getX() > r.getX() + 0.5f)
-            drawHairline (g, { cell.getX(), cell.getY() + 4.0f, 1.0f, h - 8.0f });
-        if (cell.getY() > r.getY() + 0.5f)
-            drawHairline (g, { cell.getX() + 4.0f, cell.getY(), w - 8.0f, 1.0f });
+        // Separators between two options that are not keys: left edge inside a row, top between rows.
+        const auto keyNext = [this] (int j) { return j == selected || (j == hovered && isEnabled()); };
+        const auto cols = vertical ? 1 : (columns > 0 ? std::min (columns, options.size()) : options.size());
+        if (cell.getX() > r.getX() + 1.0f && ! isSel && ! isHover && ! keyNext (i - 1))
+            drawHairline (g, { cell.getX(), cell.getY() + 5.0f, 1.0f, cell.getHeight() - 10.0f });
+        if (cell.getY() > r.getY() + 1.0f && ! isSel && ! isHover && ! keyNext (i - cols))
+            drawHairline (g, { cell.getX() + 5.0f, cell.getY(), cell.getWidth() - 10.0f, 1.0f });
 
-        const bool isSel = i == selected;
-        if (isSel)
+        Face::State s;
+        s.enabled = enabled;
+        s.on = isSel;
+        s.hover = isHover;
+        if (isSel || isHover)
         {
-            g.setColour (Colours::surfaceHover);
-            g.fillRect (cell.reduced (1.0f));
-            g.setColour (Colours::accent);
-            if (vertical) // a short bar on the left edge
-                g.fillRect (cell.reduced (0.0f, h * 0.28f).withWidth (1.5f).withX (cell.getX() + 2.0f));
-            else
-                g.fillRect (cell.reduced (w * 0.3f, 0.0f).withHeight (1.5f).withBottomY (cell.getBottom() - 2.0f));
+            if (! isSel)
+                g.beginTransparencyLayer (0.55f); // hovered: a hint of a key
+            Face::key (g, cell.reduced (2.0f), s);
+            if (! isSel)
+                g.endTransparencyLayer();
         }
-
-        drawText (g, options[i], cell, TextStyle::label,
-                  isSel ? Colours::text : (i == hovered ? Colours::text.withAlpha (0.8f) : Colours::textDim),
-                  juce::Justification::centred);
+        drawText (g, options[i], cell, TextStyle::label, Face::text (s), juce::Justification::centred);
     }
 }
 

@@ -14,6 +14,8 @@ namespace
     const char* dirtModes[] = { "WARM", "FUZZ", "CRUSH" };
     const char* wobbleModes[] = { "TAPE", "CHORUS" };
     const char* pumpModes[] = { "1/4", "1/8", "1/16" };
+    constexpr float twoPi = juce::MathConstants<float>::twoPi;
+    constexpr float pi = juce::MathConstants<float>::pi;
 
     juce::String percent (float v) { return juce::String (juce::roundToInt (v * 100.0f)) + "%"; }
 
@@ -28,11 +30,25 @@ namespace
         const auto f0 = SpectrumAnalyzer::bandFrequency (0), f1 = SpectrumAnalyzer::bandFrequency (SpectrumAnalyzer::numBands - 1);
         return juce::jlimit (0.0f, 1.0f, std::log (hz / f0) / std::log (f1 / f0));
     }
+
+    /** Round a ring: angle 0 at the bottom (the lows), pi at the top (the highs). */
+    float uOfAngle (float a) { return a <= pi ? a / pi : (twoPi - a) / pi; }
+
+    // Perspective: depth 0 is here (as wide as the screen), 1 the far end (a small hole).
+    constexpr float zNear = 1.0f, zFar = 15.0f;
 }
 
 FxView::FxView (KerfAudioProcessor& p, AnimationClock& c) : processor (p), clock (c)
 {
-    static_assert (bins == SpectrumAnalyzer::numBands, "one ridge point per spectrum band");
+    static_assert (bins == SpectrumAnalyzer::numBands, "one ring point per spectrum band");
+    for (int i = 0; i < 110; ++i)
+        stars.push_back ({ random.nextFloat() * twoPi, random.nextFloat(), 0.6f + 0.8f * random.nextFloat(), 0.6f + 1.4f * random.nextFloat() });
+    for (int i = 0; i < maxRings; ++i) // the tunnel is there from the start (quiet rings)
+    {
+        Ring ring;
+        ring.depth = (float) i / (float) maxRings;
+        rings.push_back (ring);
+    }
     clock.add (this);
     setInterceptsMouseClicks (false, false);
 }
@@ -47,35 +63,22 @@ void FxView::resized()
     auto r = getLocalBounds().toFloat();
     header = r.removeFromTop (26.0f);
     r.removeFromTop (2.0f);
-
-    auto modules = r.removeFromRight (318.0f);
-    r.removeFromRight (10.0f);
-    chainScreen = r;
-
-    spaceScreen = modules.removeFromTop (modules.getHeight() * 0.3f);
-    modules.removeFromTop (8.0f);
-    auto row1 = modules.removeFromTop ((modules.getHeight() - 8.0f) * 0.5f);
-    modules.removeFromTop (8.0f);
-    auto row2 = modules;
-    const auto half = (row1.getWidth() - 8.0f) * 0.5f;
-    dirtScreen = row1.removeFromLeft (half);
-    toneScreen = row1.withTrimmedLeft (8.0f);
-    wobbleScreen = row2.removeFromLeft (half);
-    pumpScreen = row2.withTrimmedLeft (8.0f);
+    tunnelScreen = r;
 }
 
 FxView::Settings FxView::readSettings() const
 {
     auto value = [this] (const char* id) { return processor.getParameters().getRawParameterValue (id)->load(); };
     Settings st;
-    st.space = value (Params::space);
-    st.dirt = value (Params::drive);
+    const auto on = value (Params::fxOff) < 0.5f; // the tab switched off: the tunnel runs plain
+    st.space = on ? value (Params::space) : 0.0f;
+    st.dirt = on ? value (Params::drive) : 0.0f;
     st.dirtMode = juce::jlimit (0, 2, (int) value (Params::dirtMode));
-    st.filter = value (Params::filter);
+    st.filter = on ? value (Params::filter) : 0.0f;
     st.resonance = value (Params::resonance);
-    st.wobble = value (Params::wobble);
+    st.wobble = on ? value (Params::wobble) : 0.0f;
     st.wobbleMode = juce::jlimit (0, 1, (int) value (Params::wobbleMode));
-    st.pump = value (Params::pump);
+    st.pump = on ? value (Params::pump) : 0.0f;
     st.pumpMode = juce::jlimit (0, 2, (int) value (Params::pumpMode));
     const auto delay = PingPongDelay::fromMacro (st.space, processor.getEffectiveTempo());
     st.delaySeconds = std::max (0.05, delay.delaySeconds);
@@ -86,65 +89,107 @@ FxView::Settings FxView::readSettings() const
 //==============================================================================
 void FxView::animationTick (double dt)
 {
+    const ScreenScope screenColours; // (colours picked here are the screen's too)
     if (! isVisible())
         return;
 
     time += dt;
     if (intro < 1.0f)
         intro = std::min (1.0f, intro + (float) dt / 0.75f);
+    const auto step = (float) std::min (dt, 0.05);
 
     s = readSettings();
 
-    // Output spectrum -> the newest ridge (fast rise, slower fall).
+    // The output spectrum (fast rise, slower fall): the shape of the next ring.
     const auto& bands = processor.getSpectrum().getBands();
     for (int b = 0; b < bins; ++b)
     {
-        // Quiet bands sink to the floor; only real energy makes mountains.
         const auto v = std::pow (juce::jlimit (0.0f, 1.0f, (bands[(size_t) b] + 66.0f) / 60.0f), 1.6f);
         current[(size_t) b] += (v - current[(size_t) b]) * (v > current[(size_t) b] ? 0.6f : 0.25f);
     }
 
-    // Output level and the latest sample (for the DIRT dot).
+    // Output level.
     {
         auto& tap = processor.getOutputTap();
         tap.pull();
         float peak = 0.0f;
         for (int i = 0; i < 512; ++i)
             peak = std::max ({ peak, std::abs (tap.getLeft (i)), std::abs (tap.getRight (i)) });
-        level = peak > level ? peak : level + (peak - level) * std::min (1.0f, (float) dt * 5.0f);
-        sample = 0.5f * (tap.getLeft (0) + tap.getRight (0));
-    }
-
-    // A new row every other frame (30 rows a second): the landscape moves back.
-    if (++tickCount % 2 == 0)
-    {
-        newestRow = (newestRow + 1) % rows;
-        history[(size_t) newestRow] = current;
+        level = peak > level ? peak : level + (peak - level) * std::min (1.0f, step * 5.0f);
     }
 
     // WOBBLE and PUMP move while something plays (the host, the pattern, a chop or the
-    // sample) and hold where they are when it stops. Playback starting again: they start from
-    // the top (PUMP follows the effect's own clock, which starts its cycle from the top too).
+    // sample) and hold where they are when it stops.
     bool playing = processor.isHostPlaying() || processor.isPatternPlaying();
     for (const auto& v : processor.getEngine().getVoiceDisplay())
         playing = playing || v.chopId.load (std::memory_order_relaxed) != 0;
     if (playing)
     {
-        if (! wasPlaying)
-            motion = 0.0;
-        motion += dt;
+        motion += dt; // (playing again: it goes on from where it stood)
         pumpPpq = processor.getPumpPpq();
     }
-    wasPlaying = playing;
     pumpGain = PumpProcessor::gainAt (pumpPpq, processor.getEffectiveTempo(), { s.pump, (PumpProcessor::Mode) s.pumpMode });
+    const auto duck = s.pump * (1.0f - pumpGain); // 0 .. pump: how far it is ducked right now
+    flash += (duck - flash) * std::min (1.0f, step * (duck > flash ? 30.0f : 6.0f));
 
-    // At rest (silence, the landscape run empty, nothing changed): no repaint.
-    const auto moving = playing && (s.wobble > 0.001f || s.pump > 0.001f);
-    if (idle.update (dt, intro < 1.0f || processor.isSounding() || moving, processor.getParameterChangeCount()))
+    // The flight: cruising slowly, faster with the sound, surging with the PUMP.
+    const auto sounding = processor.isSounding() || playing;
+    const auto target = (sounding ? 0.16f + 0.5f * std::min (1.0f, level) : 0.05f) * (1.0f + 1.5f * duck);
+    speed += (target - speed) * std::min (1.0f, step * 3.0f);
+    for (auto& ring : rings)
+        ring.depth -= speed * step;
+    rings.erase (std::remove_if (rings.begin(), rings.end(), [] (const Ring& r) { return r.depth <= -0.02f; }), rings.end());
+    spawn += speed * step;
+    const auto spacing = 1.0f / (float) maxRings;
+    while (spawn >= spacing && (int) rings.size() < maxRings + 2)
+    {
+        spawn -= spacing;
+        Ring ring;
+        ring.spectrum = current;
+        ring.depth = 1.0f - spawn;
+        rings.push_back (ring);
+    }
+
+    for (auto& star : stars)
+    {
+        star.depth -= speed * 1.7f * star.speed * step;
+        if (star.depth <= 0.0f)
+        {
+            star.depth += 1.0f;
+            star.angle = random.nextFloat() * twoPi;
+        }
+    }
+
+    // FUZZ: sparks off the nearest rings, more the louder and dirtier.
+    for (auto& sp : sparks)
+    {
+        sp.age += step;
+        sp.pos += sp.velocity * step;
+        sp.velocity *= std::exp (-step * 2.0f);
+    }
+    sparks.erase (std::remove_if (sparks.begin(), sparks.end(), [] (const Spark& sp) { return sp.age >= sp.life; }), sparks.end());
+    if (s.dirtMode == 1 && s.dirt > 0.01f && sounding && ! tunnelScreen.isEmpty())
+    {
+        const auto count = (int) (s.dirt * (2.0f + 10.0f * std::min (1.0f, level)));
+        for (int i = 0; i < count && sparks.size() < 260; ++i)
+        {
+            const auto depth = 0.08f + 0.35f * random.nextFloat();
+            const auto a = random.nextFloat() * twoPi;
+            const auto r = radiusAt (depth) * 0.85f;
+            const juce::Point<float> dir (std::sin (a), std::cos (a));
+            Spark sp;
+            sp.pos = centreAt (depth) + dir * r;
+            sp.velocity = dir * (120.0f + 380.0f * random.nextFloat());
+            sp.life = 0.25f + 0.35f * random.nextFloat();
+            sparks.push_back (sp);
+        }
+    }
+
+    if (idle.update (dt, intro < 1.0f || sounding || speed > 0.01f, processor.getParameterChangeCount()))
         repaint();
 }
 
-float FxView::shapeHeight (float h, int) const
+float FxView::shapeHeight (float h) const
 {
     const auto a = s.dirt;
     if (a < 0.001f)
@@ -167,6 +212,78 @@ float FxView::shapeHeight (float h, int) const
     }
 }
 
+float FxView::heightAt (const Ring& ring, float u) const
+{
+    const auto x = juce::jlimit (0.0f, (float) bins - 1.001f, u * (float) (bins - 1));
+    const auto i = (size_t) x;
+    const auto f = x - (float) i;
+    return shapeHeight (ring.spectrum[i] + (ring.spectrum[std::min (i + 1, (size_t) bins - 1)] - ring.spectrum[i]) * f);
+}
+
+juce::Point<float> FxView::centreAt (float depth) const
+{
+    // WOBBLE bends the tunnel: the further away, the further off (the camera is here).
+    auto c = tunnelScreen.getCentre().translated (0.0f, -tunnelScreen.getHeight() * 0.03f);
+    if (s.wobble > 0.001f)
+    {
+        const auto m = (float) motion;
+        const auto d = juce::jlimit (0.0f, 1.0f, depth);
+        juce::Point<float> off;
+        if (s.wobbleMode == 0) // TAPE: slow and uneven
+            off = { std::sin (m * 0.9f + d * 4.0f) * 0.65f + std::sin (m * 0.37f + d * 7.0f) * 0.35f,
+                    std::cos (m * 0.7f + d * 3.0f) * 0.5f };
+        else                   // CHORUS: even
+            off = { std::sin (m * 1.7f + d * 5.0f), 0.45f * std::cos (m * 1.7f + d * 5.0f) };
+        c += off * s.wobble * tunnelScreen.getWidth() * 0.14f * (0.25f + d);
+    }
+    return c;
+}
+
+float FxView::radiusAt (float depth) const
+{
+    const auto rMax = std::max (tunnelScreen.getWidth(), tunnelScreen.getHeight()) * 0.62f;
+    const auto pumpScale = 1.0f - 0.22f * s.pump * (1.0f - pumpGain); // PUMP: the tunnel contracts
+    return rMax * zNear / (zNear + juce::jlimit (-0.05f, 1.0f, depth) * (zFar - zNear)) * pumpScale;
+}
+
+juce::Path FxView::ringPath (const Ring& ring, float depth, juce::Point<float> offset, bool passBand, bool& any) const
+{
+    // The ring's outline: the spectrum round it (lows at the bottom). DIRT: CRUSH breaks it into
+    // a polygon, FUZZ makes it crackle. FILTER: `passBand` keeps what the filter lets through
+    // (or, false, what it removes) - drawn bright and dark.
+    const auto c = centreAt (depth) + offset;
+    const auto r = radiusAt (depth);
+    const auto crush = s.dirtMode == 2 && s.dirt > 0.01f;
+    const auto facets = crush ? std::max (5, juce::roundToInt (40.0f - 34.0f * s.dirt)) : points;
+    const auto fuzz = s.dirtMode == 1 ? s.dirt : 0.0f;
+    const auto cutU = s.filter < -0.005f ? freqToU (ToneProcessor::lowPassCutoff (s.filter))
+                    : (s.filter > 0.005f ? freqToU (ToneProcessor::highPassCutoff (s.filter)) : -1.0f);
+    auto kept = [this, cutU] (float u) { return cutU < 0.0f || (s.filter < 0.0f ? u <= cutU : u >= cutU); };
+
+    juce::Path path;
+    bool drawing = false;
+    auto& rng = const_cast<juce::Random&> (random); // (the crackle is new every frame)
+    for (int k = 0; k <= facets; ++k)
+    {
+        const auto a = twoPi * (float) k / (float) facets;
+        const auto u = uOfAngle (std::fmod (a, twoPi));
+        const auto inBand = kept (u) == passBand;
+        if (! inBand)
+        {
+            drawing = false;
+            continue;
+        }
+        auto h = heightAt (ring, u);
+        if (fuzz > 0.0f && depth < 0.5f)
+            h += (rng.nextFloat() - 0.5f) * 0.25f * fuzz;
+        const auto rr = r * (0.7f + 0.42f * h);
+        const juce::Point<float> p (c.x + std::sin (a) * rr, c.y + std::cos (a) * rr);
+        if (! drawing) { path.startNewSubPath (p); drawing = true; any = true; }
+        else           path.lineTo (p);
+    }
+    return path;
+}
+
 //==============================================================================
 void FxView::paint (juce::Graphics& g)
 {
@@ -178,572 +295,189 @@ void FxView::paint (juce::Graphics& g)
         drawText (g, "FX", h.removeFromLeft (40.0f), TextStyle::sectionLabel, Colours::text);
 
         juce::String readout;
-        readout << "SPACE " << percent (s.space)
+        readout << "ECHO " << percent (s.space)
                 << "   DIRT " << dirtModes[s.dirtMode] << " " << percent (s.dirt)
-                << "   TONE " << (s.filter < -0.005f ? "LP " + hzShort (ToneProcessor::lowPassCutoff (s.filter))
-                                                    : (s.filter > 0.005f ? "HP " + hzShort (ToneProcessor::highPassCutoff (s.filter)) : juce::String ("OFF")))
+                << "   FILTER " << (s.filter < -0.005f ? "LP " + hzShort (ToneProcessor::lowPassCutoff (s.filter))
+                                                      : (s.filter > 0.005f ? "HP " + hzShort (ToneProcessor::highPassCutoff (s.filter)) : juce::String ("OFF")))
                 << "   WOBBLE " << wobbleModes[s.wobbleMode] << " " << percent (s.wobble)
                 << "   PUMP " << pumpModes[s.pumpMode] << " " << percent (s.pump);
         drawText (g, readout, h, TextStyle::micro, Colours::textFaint, juce::Justification::centredRight);
     }
 
-    paintChain (g, chainScreen);
-    paintSpace (g, spaceScreen);
-    paintDirt (g, dirtScreen);
-    paintTone (g, toneScreen);
-    paintWobble (g, wobbleScreen);
-    paintPump (g, pumpScreen);
+    const ScreenScope screenColours; // the screen: a dark display in every theme (the frame round it is not)
+    paintTunnel (g, tunnelScreen);
 
-    // Opening animation: the screens switch on one after another.
     if (intro < 1.0f)
-    {
-        const juce::Rectangle<float> screens[] = { chainScreen, spaceScreen, dirtScreen, toneScreen, wobbleScreen, pumpScreen };
-        for (int i = 0; i < 6; ++i)
-            screen::powerOn (g, screens[i], intro * 1.6f - 0.1f * (float) i);
-    }
+        screen::powerOn (g, tunnelScreen, intro * 1.3f);
 }
 
-void FxView::moduleFrame (juce::Graphics& g, juce::Rectangle<float> area, const juce::String& label, const juce::String& value, bool on) const
+void FxView::paintTunnel (juce::Graphics& g, juce::Rectangle<float> area)
 {
-    screen::paintScreen (g, area, label, on ? 0.7f : 0.35f, this);
-    hudText (g, on ? value : juce::String ("OFF"), area.reduced (12.0f, 8.0f).withTrimmedTop (area.getHeight() - 28.0f),
-             on ? 0.6f : 0.3f, juce::Justification::centredRight);
-}
-
-//==============================================================================
-void FxView::paintChain (juce::Graphics& g, juce::Rectangle<float> area)
-{
-    screen::paintScreen (g, area, "FX CHAIN", 0.6f, this);
+    screen::paintScreen (g, area, "WORMHOLE", 0.6f, this);
     juce::Graphics::ScopedSaveState save (g);
     g.reduceClipRegion (area.reduced (1.0f).toNearestInt());
 
-    const auto m = area.reduced (18.0f, 14.0f).withTrimmedTop (10.0f);
-    const auto horizon = m.getY() + m.getHeight() * 0.16f;
-    const auto front = m.getBottom() - 18.0f;
-    const auto vp = m.getCentreX();
-    const auto backScale = 0.52f;
+    // Colours. At night: a dark tunnel lit from its far end, the near rings in the theme
+    // colour turning into the second colour into the distance. In white mode: a bright tunnel
+    // (the light at the end white), the rings in the deep theme colour, paling into the distance.
+    const auto light = lightTheme();
+    const auto second = nebulaGlow() != juce::Colour() ? nebulaGlow() : signal().withRotatedHue (0.12f);
+    const auto nearColour = light ? signal().darker (0.25f) : signal().brighter (0.15f);
+    const auto farColour = light ? signal().interpolatedWith (second, 0.45f) : second;
+    const auto ghostColour = light ? second.darker (0.25f) : second;
+    const auto sparkColour = light ? signal().darker (0.4f) : hot (0.7f);
+    const auto railColour = light ? signal().darker (0.45f) : hot (0.5f);
+    const auto starColour = light ? signal().darker (0.2f) : juce::Colours::white;
+    const auto glowScale = light ? 0.35f : 1.0f; // (dark halos on white look like smudges)
+    const auto warm = s.dirtMode == 0 ? s.dirt : 0.0f;
+    const auto end = centreAt (1.0f);
+    const auto hole = radiusAt (1.0f);
 
-    auto rowY = [&] (float t) { return front + (horizon - front) * std::pow (t, 0.8f); };
-    auto rowScale = [&] (float t) { return 1.0f + (backScale - 1.0f) * t; };
-    auto xAt = [&] (float u, float t) { return vp + ((m.getX() + u * m.getWidth()) - vp) * rowScale (t); };
-    const auto ampFront = (front - horizon) * 0.62f;
-
-    // WOBBLE: the landscape wavers (TAPE slow and uneven, CHORUS even).
-    auto wobbleAt = [&] (int rowAge)
+    // Space round the tunnel: at night darker towards the edges; on white, a soft light from
+    // the far end.
+    if (! light)
     {
-        if (s.wobble < 0.001f)
-            return 0.0f;
-        const auto t = motion - rowAge / 30.0;
-        const auto w = s.wobbleMode == 0 ? std::sin (t * 1.4) + 0.45 * std::sin (t * 3.7 + 1.0) + 0.2 * std::sin (t * 9.1)
-                                         : std::sin (t * 5.0);
-        return (float) w * 9.0f * s.wobble;
-    };
-
-    // CRUSH also steps the ridges sideways.
-    const auto step = s.dirt > 0.001f && s.dirtMode == 2 ? 1 + juce::roundToInt (6.0f * s.dirt) : 1;
-    const auto heat = s.dirt > 0.001f && s.dirtMode == 0 ? 0.35f * s.dirt : 0.0f;
-
-    // Floor grid (converging lines + depth lines)
-    g.setColour (screen::hud().withAlpha (0.05f));
-    for (int k = 0; k <= 16; ++k)
-    {
-        const auto u = (float) k / 16.0f;
-        g.drawLine (xAt (u, 0.0f), front, xAt (u, 1.0f), horizon, 1.0f);
-    }
-    for (int k = 0; k <= 6; ++k)
-    {
-        const auto t = (float) k / 6.0f;
-        g.drawLine (xAt (0.0f, t), rowY (t), xAt (1.0f, t), rowY (t), 1.0f);
+        g.setGradientFill (juce::ColourGradient (juce::Colours::black.withAlpha (0.0f), end, juce::Colours::black.withAlpha (0.6f),
+                                                 end.translated (area.getWidth() * 0.6f, 0.0f), true));
+        g.fillRect (area);
     }
 
-    // PUMP: on every cycle a pulse of light rolls from the front to the horizon over the
-    // floor, fading as it goes (the swell after each dip).
-    const auto pumping = s.pump > 0.001f;
-    const auto pumpPhase = pumping ? (float) (pumpPpq / PumpProcessor::cycleBeats ((PumpProcessor::Mode) s.pumpMode)
-                                              - std::floor (pumpPpq / PumpProcessor::cycleBeats ((PumpProcessor::Mode) s.pumpMode))) : 0.0f;
-    if (pumping)
+    // Stars streaking past (warp): out from the far end along the tunnel walls.
+    for (const auto& star : stars)
     {
-        const auto t = std::pow (pumpPhase, 0.6f);
-        const auto y = rowY (t);
-        const auto strength = (1.0f - pumpPhase) * (0.35f + 0.65f * s.pump);
-        juce::Path pulse;
-        pulse.startNewSubPath (xAt (0.0f, t), y);
-        pulse.lineTo (xAt (1.0f, t), y);
-        glowStroke (g, pulse, signal().withAlpha (0.8f * strength), 1.4f, strength);
-
-        // A glow on the floor behind the pulse.
-        g.setGradientFill (juce::ColourGradient (signal().withAlpha (0.12f * strength), vp, y,
-                                                 signal().withAlpha (0.0f), vp, front, false));
-        juce::Path floor;
-        floor.startNewSubPath (xAt (0.0f, t), y);
-        floor.lineTo (xAt (1.0f, t), y);
-        floor.lineTo (xAt (1.0f, 0.0f), front);
-        floor.lineTo (xAt (0.0f, 0.0f), front);
-        floor.closeSubPath();
-        g.fillPath (floor);
+        const juce::Point<float> dir (std::sin (star.angle), std::cos (star.angle));
+        const auto d0 = star.depth, d1 = std::min (1.0f, star.depth + 0.03f + speed * 0.25f);
+        const auto p0 = centreAt (d0) + dir * radiusAt (d0) * 1.15f;
+        auto p1 = centreAt (d1) + dir * radiusAt (d1) * 1.15f;
+        if (p1.getDistanceFrom (p0) > 90.0f) // close by: a short streak, not a line across the screen
+            p1 = p0 + (p1 - p0) * (90.0f / p1.getDistanceFrom (p0));
+        const auto alpha = (1.0f - d0) * (light ? 0.35f : 0.55f) * juce::jlimit (0.0f, 1.0f, (d0 - 0.04f) / 0.12f);
+        g.setColour (starColour.withAlpha (alpha));
+        g.drawLine ({ p1, p0 }, star.size * (0.4f + (1.0f - d0)));
     }
 
-    auto ridgePath = [&] (const std::array<float, bins>& row, float t, float dx, juce::Path& ridge, juce::Path* solid)
+    // The light at the far end: pulsing with the sound, flashing with the PUMP.
     {
-        const auto scale = rowScale (t);
-        const auto base = rowY (t);
-        for (int b = 0; b < bins; ++b)
+        const auto glow = hole * (2.5f + 6.0f * std::min (1.0f, level) + 5.0f * flash);
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (light ? 1.0f : 0.9f), end,
+                                                 (light ? juce::Colours::white : signal()).withAlpha (0.0f), end.translated (glow, 0.0f), true));
+        g.fillEllipse (juce::Rectangle<float> (glow * 2.0f, glow * 2.0f).withCentre (end));
+        if (! light)
         {
-            const auto src = b - (b % step);
-            const auto h = shapeHeight (row[(size_t) src], b);
-            const auto x = xAt ((float) b / (float) (bins - 1), t) + dx * scale;
-            const auto y = base - h * ampFront * scale;
-            if (b == 0)
+            g.setGradientFill (juce::ColourGradient (signal().withAlpha (0.22f + 0.3f * flash), end, signal().withAlpha (0.0f),
+                                                     end.translated (glow * 2.4f, 0.0f), true));
+            g.fillEllipse (juce::Rectangle<float> (glow * 4.8f, glow * 4.8f).withCentre (end));
+        }
+        else // a halo of light round the hole (white mode)
+        {
+            g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.7f), end, juce::Colours::white.withAlpha (0.0f),
+                                                     end.translated (glow * 3.0f, 0.0f), true));
+            g.fillEllipse (juce::Rectangle<float> (glow * 6.0f, glow * 6.0f).withCentre (end));
+        }
+    }
+
+    // The rings, far to near (so the near ones lie on top).
+    auto sorted = rings;
+    std::sort (sorted.begin(), sorted.end(), [] (const Ring& a, const Ring& b) { return a.depth > b.depth; });
+    const auto echoes = s.space > 0.01f ? 1 + juce::jlimit (0, 2, (int) (s.feedback * 3.5f)) : 0;
+    const auto chorus = s.wobbleMode == 1 && s.wobble > 0.01f;
+    for (const auto& ring : sorted)
+    {
+        const auto d = ring.depth;
+        if (d < -0.02f || d > 1.0f)
+            continue;
+        const auto fadeIn = juce::jlimit (0.0f, 1.0f, (1.0f - d) / 0.15f), fadeOut = juce::jlimit (0.0f, 1.0f, (d + 0.02f) / 0.1f);
+        const auto alpha = (light ? 0.12f + 0.88f * (1.0f - d) : 0.2f + 0.8f * (1.0f - d)) * fadeIn * fadeOut;
+        const auto colour = nearColour.interpolatedWith (farColour, juce::jlimit (0.0f, 1.0f, d * 1.2f))
+                                      .interpolatedWith (light ? sparkColour : hot (0.6f), warm * 0.6f);
+        const auto width = (0.6f + 2.2f * (1.0f - d)) * (1.0f + 1.5f * warm);
+        const auto glowAmount = ((d < 0.5f ? 0.6f : 0.25f) * (1.0f + 1.2f * warm) + 0.4f * flash) * glowScale;
+
+        // ECHO: ghost rings behind this one, thrown left and right, each fainter.
+        if (echoes > 0 && d < 0.85f)
+            for (int k = 1; k <= echoes; ++k)
             {
-                ridge.startNewSubPath (x, y);
-                if (solid != nullptr) { solid->startNewSubPath (x, base + 1.5f); solid->lineTo (x, y); }
+                const auto gd = d + (float) k * (0.03f + 0.04f * s.space);
+                const juce::Point<float> off ((k % 2 == 1 ? 1.0f : -1.0f) * area.getWidth() * (0.025f + 0.03f * s.space) * (float) k * (1.0f - gd * 0.6f), 0.0f);
+                bool any = false;
+                const auto ghost = ringPath (ring, gd, off, true, any);
+                if (any)
+                {
+                    g.setColour (ghostColour.withAlpha (alpha * 0.55f * std::pow (std::max (0.2f, s.feedback), (float) k) * std::min (1.0f, s.space * 3.0f)));
+                    g.strokePath (ghost, juce::PathStrokeType (std::max (0.6f, width * 0.6f)));
+                }
             }
+
+        // The ring: what the FILTER lets through bright, what it removes faint.
+        for (const auto pass : { false, true })
+        {
+            bool any = false;
+            const auto outline = ringPath (ring, d, {}, pass, any);
+            if (! any)
+                continue;
+            if (! pass)
+            {
+                g.setColour (colour.withAlpha (alpha * 0.12f));
+                g.strokePath (outline, juce::PathStrokeType (width * 0.7f));
+                continue;
+            }
+            if (d < 0.6f && glowAmount > 0.01f)
+                glowStroke (g, outline, colour.withAlpha (alpha), width, glowAmount);
             else
             {
-                ridge.lineTo (x, y);
-                if (solid != nullptr) solid->lineTo (x, y);
+                g.setColour (colour.withAlpha (alpha));
+                g.strokePath (outline, juce::PathStrokeType (width));
+            }
+            if (chorus) // CHORUS: every ring doubled, a little apart
+            {
+                bool anyTwin = false;
+                const auto twin = ringPath (ring, d + 0.012f, { area.getWidth() * 0.008f * s.wobble, 0.0f }, true, anyTwin);
+                if (anyTwin)
+                {
+                    g.setColour (ghostColour.withAlpha (alpha * 0.45f * s.wobble));
+                    g.strokePath (twin, juce::PathStrokeType (width * 0.7f));
+                }
             }
         }
-        if (solid != nullptr)
-        {
-            solid->lineTo (xAt (1.0f, t) + dx * scale, base + 1.5f);
-            solid->closeSubPath();
-        }
-    };
-
-    // Ridges, back to front; each one hides what is behind it. With PUMP the nearest ones
-    // dim on the dip and glow up on the swell.
-    const auto linger = 1.7f;
-    const auto breath = pumping ? 0.35f + 0.65f * pumpGain : 1.0f;
-    for (int k = rows - 1; k >= 0; --k)
-    {
-        const auto t = (float) k / (float) (rows - 1);
-        const auto& row = history[(size_t) ((newestRow - k + rows) % rows)];
-        juce::Path ridge, solid;
-        ridgePath (row, t, wobbleAt (k), ridge, &solid);
-
-        g.setColour (screen::bg());
-        g.fillPath (solid);
-
-        const auto nearness = std::pow (1.0f - t, linger);
-        const auto lit = 1.0f - (1.0f - breath) * nearness; // the front breathes most
-        const auto colour = screen::heat (signal(), heat + (pumping ? 0.25f * (pumpGain - 0.5f) * nearness : 0.0f))
-                                    .withAlpha ((0.10f + 0.85f * nearness) * lit);
-        glowStroke (g, ridge, colour, k == 0 ? 1.8f : 1.0f, k < 3 ? (1.0f - t) * (0.6f + heat) * lit : 0.0f);
-
-        // CHORUS: a second, shifted image of the nearest ridges.
-        if (k < 3 && s.wobble > 0.001f && s.wobbleMode == 1)
-        {
-            juce::Path twin;
-            ridgePath (row, t, -wobbleAt (k), twin, nullptr);
-            g.setColour (signal().withAlpha (0.35f * s.wobble * (1.0f - t)));
-            g.strokePath (twin, juce::PathStrokeType (1.0f));
-        }
     }
 
-    // SPACE: ghost echoes of the front ridge, further back each time, bouncing left / right.
-    if (s.space > 0.001f)
-    {
-        const auto rowsPerEcho = (float) s.delaySeconds * 30.0f;
-        auto strength = 1.0f;
-        for (int e = 1; e <= 5; ++e)
-        {
-            strength *= std::max (0.3f, s.feedback);
-            const auto depth = std::min (0.92f, (float) e * rowsPerEcho / (float) (rows - 1));
-            const auto side = (e % 2 == 1 ? -1.0f : 1.0f) * (10.0f + 8.0f * (float) e) * s.space;
-            juce::Path ghost;
-            ridgePath (current, depth, side, ghost, nullptr);
-            glowStroke (g, ghost, hot (0.25f).withAlpha (0.65f * s.space * strength), 1.0f, 0.5f * strength);
-        }
-    }
-
-    // TONE: a wall of light at the cutoff; the removed side is darkened; resonance peaks.
+    // FILTER: a string of lights down the tunnel at the cutoff, on both walls (resonance:
+    // brighter and bigger).
     if (std::abs (s.filter) > 0.005f)
     {
-        const auto lowPass = s.filter < 0.0f;
-        const auto cutoff = lowPass ? ToneProcessor::lowPassCutoff (s.filter) : ToneProcessor::highPassCutoff (s.filter);
-        const auto uc = freqToU (cutoff);
-        const auto edge = lowPass ? 1.0f : 0.0f;
-        const auto strength = std::sqrt (std::abs (s.filter));
-
-        juce::Path shade;
-        shade.startNewSubPath (xAt (uc, 0.0f), front + 18.0f);
-        shade.lineTo (xAt (edge, 0.0f) + (lowPass ? 30.0f : -30.0f), front + 18.0f);
-        shade.lineTo (xAt (edge, 1.0f) + (lowPass ? 30.0f : -30.0f), m.getY());
-        shade.lineTo (xAt (uc, 1.0f), m.getY());
-        shade.closeSubPath();
-        g.setColour (screen::bg().withAlpha (0.55f * strength));
-        g.fillPath (shade);
-
-        juce::Path wall;
-        wall.startNewSubPath (xAt (uc, 0.0f), front);
-        wall.lineTo (xAt (uc, 1.0f), horizon);
-        glowStroke (g, wall, signal().withAlpha (0.7f), 1.2f, 0.8f);
-
-        const auto x = xAt (uc, 0.0f);
-        g.setGradientFill (juce::ColourGradient (signal().withAlpha (0.0f), x, front - ampFront, signal().withAlpha (0.3f * strength), x, front, false));
-        g.fillRect (juce::Rectangle<float> (x - 4.0f, front - ampFront, 8.0f, ampFront));
-
-        if (s.resonance > 0.05f)
+        const auto cutU = s.filter < 0.0f ? freqToU (ToneProcessor::lowPassCutoff (s.filter)) : freqToU (ToneProcessor::highPassCutoff (s.filter));
+        for (const auto& ring : sorted)
         {
-            const auto b = juce::jlimit (0, bins - 1, juce::roundToInt (uc * (bins - 1)));
-            const auto y = front - shapeHeight (current[(size_t) b], b) * ampFront - s.resonance * 22.0f;
-            const auto r = 2.0f + 5.0f * s.resonance;
-            g.setGradientFill (juce::ColourGradient (signal().withAlpha (0.5f), x, y, signal().withAlpha (0.0f), x + r * 4.0f, y, true));
-            g.fillEllipse (juce::Rectangle<float> (r * 8.0f, r * 8.0f).withCentre ({ x, y }));
-            g.setColour (hot (0.6f));
-            g.fillEllipse (juce::Rectangle<float> (r * 1.4f, r * 1.4f).withCentre ({ x, y }));
-        }
-    }
-
-    // FUZZ: sparks where the front ridge hits the ceiling.
-    if (s.dirt > 0.05f && s.dirtMode == 1)
-    {
-        const auto ceiling = 1.0f - 0.5f * s.dirt;
-        for (int b = 0; b < bins; b += 2)
-            if (current[(size_t) b] * (1.0f + 2.0f * s.dirt) > ceiling && random.nextFloat() < 0.35f)
+            const auto d = ring.depth;
+            if (d < 0.06f || d > 0.95f)
+                continue;
+            const auto alpha = (1.0f - d) * juce::jlimit (0.0f, 1.0f, (d - 0.06f) / 0.1f) * (0.6f + 0.4f * s.resonance);
+            const auto size = (1.5f + 5.0f * (1.0f - d)) * (1.0f + 0.8f * s.resonance);
+            for (const auto a : { cutU * pi, twoPi - cutU * pi })
             {
-                const auto x = xAt ((float) b / (float) (bins - 1), 0.0f) + wobbleAt (0);
-                const auto y = front - ceiling * ampFront - 2.0f - random.nextFloat() * 6.0f;
-                g.setColour (hot (0.7f).withAlpha (0.4f + 0.6f * random.nextFloat()));
-                g.fillEllipse (juce::Rectangle<float> (2.0f, 2.0f).withCentre ({ x, y }));
+                const auto c = centreAt (d);
+                const auto r = radiusAt (d) * (0.7f + 0.42f * heightAt (ring, cutU));
+                const juce::Point<float> p (c.x + std::sin (a) * r, c.y + std::cos (a) * r);
+                if (! light)
+                {
+                    g.setColour (railColour.withAlpha (alpha * 0.25f));
+                    g.fillEllipse (juce::Rectangle<float> (size * 3.0f, size * 3.0f).withCentre (p));
+                }
+                g.setColour (railColour.withAlpha (alpha));
+                g.fillEllipse (juce::Rectangle<float> (size, size).withCentre (p));
             }
-    }
-
-    screen::scanlines (g, area);
-    hudText (g, "LOW", { m.getX(), front + 4.0f, 60.0f, 12.0f }, 0.35f);
-    hudText (g, "HIGH", { m.getRight() - 60.0f, front + 4.0f, 60.0f, 12.0f }, 0.35f, juce::Justification::centredRight);
-
-    if (level < 0.0005f)
-    {
-        const auto blink = std::fmod (time, 1.2) < 0.7;
-        hudText (g, "PLAY SOMETHING", area.withTrimmedTop (22.0f).withHeight (14.0f), blink ? 0.5f : 0.2f, juce::Justification::centred);
-    }
-}
-
-//==============================================================================
-void FxView::paintSpace (juce::Graphics& g, juce::Rectangle<float> area)
-{
-    const auto on = s.space > 0.001f;
-    moduleFrame (g, area, "SPACE", percent (s.space) + "  " + juce::String (juce::roundToInt (s.delaySeconds * 1000.0)) + " MS", on);
-    juce::Graphics::ScopedSaveState save (g);
-    g.reduceClipRegion (area.reduced (1.0f).toNearestInt());
-
-    // Ping-pong as a bouncing ball: it flies between the left and the right speaker, one
-    // echo time per flight, each arc lower by the feedback (an echo losing energy). Every
-    // landing rings; the arcs already flown glow on.
-    const auto m = area.reduced (16.0f, 10.0f).withTrimmedTop (14.0f).withTrimmedBottom (22.0f);
-    const auto floorY = m.getBottom();
-    const juce::Point<float> left (m.getX() + 14.0f, floorY), right (m.getRight() - 14.0f, floorY);
-
-    g.setColour (screen::hud().withAlpha (0.08f));
-    g.fillRect (juce::Rectangle<float> (m.getX(), floorY, m.getWidth(), 1.0f));
-
-    auto speaker = [&] (juce::Point<float> p, const char* name, float glow)
-    {
-        g.setGradientFill (juce::ColourGradient (signal().withAlpha (0.45f * glow), p.x, p.y, signal().withAlpha (0.0f), p.x + 16.0f, p.y, true));
-        g.fillEllipse (juce::Rectangle<float> (32.0f, 32.0f).withCentre (p));
-        g.setColour (on ? hot (0.2f + 0.6f * glow) : screen::hud().withAlpha (0.25f));
-        g.fillRect (juce::Rectangle<float> (7.0f, 3.0f).withCentre (p));
-        const auto side = p.x < m.getCentreX() ? -16.0f : 4.0f; // beside the speaker, outwards
-        hudText (g, name, { p.x + side, p.y - 5.0f, 12.0f, 10.0f }, 0.45f, juce::Justification::centred);
-    };
-
-    if (! on)
-    {
-        speaker (left, "L", 0.0f);
-        speaker (right, "R", 0.0f);
-        return;
-    }
-
-    constexpr int bounces = 6;
-    const auto period = s.delaySeconds;
-    const auto t = std::fmod (time, period * bounces);
-    const auto flight = juce::jlimit (0, bounces - 1, (int) (t / period));
-    const auto progress = (float) ((t - flight * period) / period);
-    const auto fb = std::max (0.35f, s.feedback);
-    const auto top = m.getHeight() * (0.55f + 0.45f * s.space);
-
-    auto arcPoint = [&] (int k, float p)
-    {
-        const auto from = k % 2 == 0 ? left : right, to = k % 2 == 0 ? right : left;
-        const auto height = top * std::pow (fb, (float) k);
-        return juce::Point<float> (from.x + (to.x - from.x) * p, floorY - 4.0f * height * p * (1.0f - p));
-    };
-
-    // Arcs already flown glow on and fade.
-    for (int k = 0; k < flight; ++k)
-    {
-        juce::Path arc;
-        for (int i = 0; i <= 40; ++i)
-        {
-            const auto p = arcPoint (k, (float) i / 40.0f);
-            if (i == 0) arc.startNewSubPath (p);
-            else        arc.lineTo (p);
-        }
-        const auto age = (float) (flight - k - 1) + progress;
-        const auto alpha = std::pow (fb, (float) k) * std::exp (-1.3f * age);
-        glowStroke (g, arc, signal().withAlpha (0.12f + 0.5f * alpha), 1.0f, 0.6f * alpha);
-    }
-
-    // The ball in flight leaves a comet tail: brighter and thicker towards the ball.
-    {
-        const auto tailStart = std::max (0.0f, progress - 0.45f);
-        constexpr int segments = 14;
-        for (int i = 0; i < segments; ++i)
-        {
-            const auto a = tailStart + (progress - tailStart) * (float) i / segments;
-            const auto b = tailStart + (progress - tailStart) * (float) (i + 1) / segments;
-            const auto w = (float) (i + 1) / segments; // 0 = end of the tail, 1 = at the ball
-            juce::Path seg;
-            seg.startNewSubPath (arcPoint (flight, a));
-            seg.lineTo (arcPoint (flight, b));
-            glowStroke (g, seg, hot (0.2f * w).withAlpha (0.15f + 0.85f * w), 0.6f + 1.6f * w, w);
         }
     }
 
-    // Landing rings.
-    float leftGlow = 0.0f, rightGlow = 0.0f;
-    for (int k = 0; k < flight; ++k)
+    // FUZZ sparks.
+    for (const auto& sp : sparks)
     {
-        const auto since = (float) (t - (k + 1) * period);
-        const auto fade = std::max (0.0f, 1.0f - since / 0.7f) * std::pow (fb, (float) k);
-        if (fade <= 0.0f)
-            continue;
-        const auto at = k % 2 == 0 ? right : left;
-        (k % 2 == 0 ? rightGlow : leftGlow) = std::max (k % 2 == 0 ? rightGlow : leftGlow, fade);
-        const auto radius = 4.0f + since * 46.0f;
-        g.setColour (signal().withAlpha (0.7f * fade));
-        g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 0.7f).withCentre (at), 1.2f);
-    }
-    if (flight == 0 && progress < 0.15f)
-        leftGlow = 1.0f - progress / 0.15f; // the sound leaves the left speaker
-
-    speaker (left, "L", leftGlow);
-    speaker (right, "R", rightGlow);
-
-    // The ball (the echo) with its bloom.
-    const auto ball = arcPoint (flight, progress);
-    const auto strength = std::pow (fb, (float) flight);
-    const auto r = 3.0f + 3.0f * strength;
-    g.setGradientFill (juce::ColourGradient (signal().withAlpha (0.55f * strength), ball.x, ball.y, signal().withAlpha (0.0f), ball.x + r * 4.0f, ball.y, true));
-    g.fillEllipse (juce::Rectangle<float> (r * 8.0f, r * 8.0f).withCentre (ball));
-    g.setColour (hot (0.5f + 0.4f * strength));
-    g.fillEllipse (juce::Rectangle<float> (r * 2.0f, r * 2.0f).withCentre (ball));
-
-    screen::scanlines (g, area);
-}
-
-void FxView::paintDirt (juce::Graphics& g, juce::Rectangle<float> area)
-{
-    const auto on = s.dirt > 0.001f;
-    moduleFrame (g, area, "DIRT", juce::String (dirtModes[s.dirtMode]) + " " + percent (s.dirt), on);
-    juce::Graphics::ScopedSaveState save (g);
-    g.reduceClipRegion (area.reduced (1.0f).toNearestInt());
-
-    const auto side = std::min (area.getWidth() - 28.0f, area.getHeight() - 44.0f);
-    const auto m = juce::Rectangle<float> (side, side).withCentre ({ area.getCentreX(), area.getCentreY() + 2.0f });
-    g.setColour (screen::hud().withAlpha (0.08f));
-    g.fillRect (juce::Rectangle<float> (m.getX(), m.getCentreY(), m.getWidth(), 1.0f));
-    g.fillRect (juce::Rectangle<float> (m.getCentreX(), m.getY(), 1.0f, m.getHeight()));
-
-    // Transfer curve: input across, output up.
-    auto transfer = [this] (float x)
-    {
-        const auto a = s.dirt;
-        if (a < 0.001f)
-            return x;
-        switch (s.dirtMode)
-        {
-            case 0: { const auto k = 1.0f + 4.0f * a; return std::tanh (k * x) / std::tanh (k); }
-            case 1: { const auto c = 1.0f - 0.35f * a; return juce::jlimit (-c, c, x * (1.0f + 6.0f * a)) / c * (0.75f + 0.25f * (1.0f - a)); }
-            default: { const auto levels = std::max (2.0f, std::round (std::pow (2.0f, 6.0f - 4.5f * a))); return std::round (x * levels) / levels; }
-        }
-    };
-
-    juce::Path curve;
-    for (int i = 0; i <= 80; ++i)
-    {
-        const auto x = -1.0f + 2.0f * (float) i / 80.0f;
-        const auto px = m.getCentreX() + x * m.getWidth() * 0.5f;
-        const auto py = m.getCentreY() - juce::jlimit (-1.0f, 1.0f, transfer (x)) * m.getHeight() * 0.5f;
-        if (i == 0) curve.startNewSubPath (px, py);
-        else        curve.lineTo (px, py);
-    }
-    glowStroke (g, curve, on ? signal() : screen::hud().withAlpha (0.25f), on ? 1.5f : 1.0f, on ? 0.8f : 0.0f);
-
-    // The signal riding the curve.
-    if (on && level > 0.0005f)
-    {
-        const auto x = juce::jlimit (-1.0f, 1.0f, sample / std::max (0.05f, level));
-        const juce::Point<float> p (m.getCentreX() + x * m.getWidth() * 0.5f, m.getCentreY() - transfer (x) * m.getHeight() * 0.5f);
-        g.setGradientFill (juce::ColourGradient (signal().withAlpha (0.5f), p.x, p.y, signal().withAlpha (0.0f), p.x + 10.0f, p.y, true));
-        g.fillEllipse (juce::Rectangle<float> (20.0f, 20.0f).withCentre (p));
-        g.setColour (hot (0.6f));
-        g.fillEllipse (juce::Rectangle<float> (4.0f, 4.0f).withCentre (p));
-    }
-    screen::scanlines (g, area);
-}
-
-void FxView::paintTone (juce::Graphics& g, juce::Rectangle<float> area)
-{
-    const auto on = std::abs (s.filter) > 0.005f;
-    const auto lowPass = s.filter < 0.0f;
-    const auto cutoff = lowPass ? ToneProcessor::lowPassCutoff (s.filter) : ToneProcessor::highPassCutoff (s.filter);
-    moduleFrame (g, area, "TONE", (lowPass ? "LP " : "HP ") + hzShort (cutoff), on);
-    juce::Graphics::ScopedSaveState save (g);
-    g.reduceClipRegion (area.reduced (1.0f).toNearestInt());
-
-    const auto m = area.reduced (12.0f, 10.0f).withTrimmedTop (16.0f).withTrimmedBottom (14.0f);
-    auto dbToY = [&m] (float db) { return m.getY() + m.getHeight() * (1.0f - (juce::jlimit (-36.0f, 18.0f, db) + 36.0f) / 54.0f); };
-
-    // Live spectrum, faint.
-    {
-        juce::Path area2;
-        area2.startNewSubPath (m.getX(), m.getBottom());
-        for (int b = 0; b < bins; ++b)
-            area2.lineTo (m.getX() + m.getWidth() * (float) b / (float) (bins - 1), m.getBottom() - current[(size_t) b] * m.getHeight() * 0.8f);
-        area2.lineTo (m.getRight(), m.getBottom());
-        area2.closeSubPath();
-        g.setColour (screen::hud().withAlpha (0.06f));
-        g.fillPath (area2);
+        const auto t = sp.age / sp.life;
+        g.setColour (sparkColour.withAlpha ((1.0f - t) * 0.9f));
+        g.drawLine ({ sp.pos, sp.pos - sp.velocity * 0.02f }, 1.4f * (1.0f - t) + 0.4f);
     }
 
-    g.setColour (screen::hud().withAlpha (0.08f));
-    g.fillRect (juce::Rectangle<float> (m.getX(), dbToY (0.0f), m.getWidth(), 1.0f));
-
-    // Response of the 12 dB filter (with resonance).
-    const auto q = 0.707f + juce::jlimit (0.0f, 1.0f, s.resonance) * 5.5f;
-    const auto f0 = SpectrumAnalyzer::bandFrequency (0), f1 = SpectrumAnalyzer::bandFrequency (bins - 1);
-    juce::Path curve;
-    for (int i = 0; i <= 90; ++i)
-    {
-        const auto u = (float) i / 90.0f;
-        const auto f = f0 * std::pow (f1 / f0, u);
-        auto db = 0.0f;
-        if (on)
-        {
-            const auto r = lowPass ? f / cutoff : cutoff / f;
-            db = -10.0f * std::log10 (std::pow (1.0f - r * r, 2.0f) + std::pow (r / q, 2.0f));
-        }
-        const auto x = m.getX() + u * m.getWidth();
-        if (i == 0) curve.startNewSubPath (x, dbToY (db));
-        else        curve.lineTo (x, dbToY (db));
-    }
-    glowStroke (g, curve, on ? signal() : screen::hud().withAlpha (0.25f), on ? 1.5f : 1.0f, on ? 0.8f : 0.0f);
-
-    if (on)
-    {
-        const auto x = m.getX() + freqToU (cutoff) * m.getWidth();
-        g.setColour (signal().withAlpha (0.35f));
-        g.fillRect (juce::Rectangle<float> (x - 0.5f, m.getY(), 1.0f, m.getHeight()));
-    }
-    screen::scanlines (g, area);
-}
-
-void FxView::paintWobble (juce::Graphics& g, juce::Rectangle<float> area)
-{
-    const auto on = s.wobble > 0.001f;
-    moduleFrame (g, area, "WOBBLE", juce::String (wobbleModes[s.wobbleMode]) + " " + percent (s.wobble), on);
-    juce::Graphics::ScopedSaveState save (g);
-    g.reduceClipRegion (area.reduced (1.0f).toNearestInt());
-
-    const auto m = area.reduced (12.0f, 10.0f).withTrimmedTop (16.0f).withTrimmedBottom (14.0f);
-    const auto cy = m.getCentreY();
-    g.setColour (screen::hud().withAlpha (0.08f));
-    g.fillRect (juce::Rectangle<float> (m.getX(), cy, m.getWidth(), 1.0f));
-
-    // The modulation scrolling past (3 seconds): TAPE wow and flutter, CHORUS two voices.
-    auto lfo = [this] (double t, float voice)
-    {
-        if (s.wobbleMode == 0)
-            return (float) (0.6 * std::sin (t * 2.0 * juce::MathConstants<double>::pi * 0.55) + 0.3 * std::sin (t * 10.7 + 1.0) + 0.12 * std::sin (t * 41.0));
-        return (float) std::sin (t * 2.0 * juce::MathConstants<double>::pi * 0.9 + voice * juce::MathConstants<double>::pi);
-    };
-    for (int voice = 0; voice < (s.wobbleMode == 1 ? 2 : 1); ++voice)
-    {
-        juce::Path trace;
-        for (int i = 0; i <= 120; ++i)
-        {
-            const auto u = (float) i / 120.0f;
-            const auto t = motion - 3.0 * (1.0 - u);
-            const auto y = cy - lfo (t, (float) voice) * (on ? s.wobble : 0.0f) * m.getHeight() * 0.45f;
-            if (i == 0) trace.startNewSubPath (m.getX() + u * m.getWidth(), y);
-            else        trace.lineTo (m.getX() + u * m.getWidth(), y);
-        }
-        glowStroke (g, trace, on ? signal().withAlpha (voice == 0 ? 1.0f : 0.5f) : screen::hud().withAlpha (0.25f), on ? 1.4f : 1.0f, on ? 0.7f : 0.0f);
-    }
-
-    if (on)
-    {
-        const auto y = cy - lfo (motion, 0.0f) * s.wobble * m.getHeight() * 0.45f;
-        g.setColour (hot (0.5f));
-        g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ m.getRight(), y }));
-    }
-    screen::scanlines (g, area);
-}
-
-void FxView::paintPump (juce::Graphics& g, juce::Rectangle<float> area)
-{
-    const auto on = s.pump > 0.001f;
-    moduleFrame (g, area, "PUMP", juce::String (pumpModes[s.pumpMode]) + " " + percent (s.pump), on);
-    juce::Graphics::ScopedSaveState save (g);
-    g.reduceClipRegion (area.reduced (1.0f).toNearestInt());
-
-    const auto m = area.reduced (12.0f, 10.0f).withTrimmedTop (16.0f).withTrimmedBottom (14.0f);
-    const PumpProcessor::Settings settings { on ? s.pump : 0.0f, (PumpProcessor::Mode) s.pumpMode };
-    const auto bpm = processor.getEffectiveTempo();
-
-    // One bar: four beats, a tick on each.
-    for (int beat = 0; beat <= 4; ++beat)
-    {
-        const auto x = m.getX() + m.getWidth() * (float) beat / 4.0f;
-        g.setColour (screen::hud().withAlpha (beat % 4 == 0 ? 0.14f : 0.08f));
-        g.fillRect (juce::Rectangle<float> (x - 0.5f, m.getBottom() - 4.0f, 1.0f, 4.0f));
-    }
-    g.setColour (screen::hud().withAlpha (0.08f));
-    g.fillRect (juce::Rectangle<float> (m.getX(), m.getBottom(), m.getWidth(), 1.0f));
-
-    // The level over the bar: a dip on every cycle, swelling back.
-    auto yFor = [&m] (float gain) { return m.getBottom() - gain * m.getHeight(); };
-    juce::Path curve, fill;
-    fill.startNewSubPath (m.getX(), m.getBottom());
-    constexpr int points = 160;
-    for (int i = 0; i <= points; ++i)
-    {
-        const auto u = (float) i / (float) points;
-        const auto y = yFor (PumpProcessor::gainAt (u * 4.0, bpm, settings));
-        const auto x = m.getX() + u * m.getWidth();
-        if (i == 0) curve.startNewSubPath (x, y);
-        else        curve.lineTo (x, y);
-        fill.lineTo (x, y);
-    }
-    fill.lineTo (m.getRight(), m.getBottom());
-    fill.closeSubPath();
-
-    if (on)
-    {
-        g.setGradientFill (juce::ColourGradient (signal().withAlpha (0.2f), m.getX(), m.getY(), signal().withAlpha (0.02f), m.getX(), m.getBottom(), false));
-        g.fillPath (fill);
-    }
-    glowStroke (g, curve, on ? signal() : screen::hud().withAlpha (0.25f), on ? 1.4f : 1.0f, on ? 0.6f : 0.0f);
-
-    if (! on)
-        return;
-
-    // The beat running along the bar, riding the curve; it flares on every dip.
-    const auto barPos = (float) (pumpPpq / 4.0 - std::floor (pumpPpq / 4.0));
-    const auto x = m.getX() + barPos * m.getWidth();
-    const juce::Point<float> dot (x, yFor (pumpGain));
-    g.setColour (signal().withAlpha (0.3f));
-    g.fillRect (juce::Rectangle<float> (x - 0.5f, m.getY(), 1.0f, m.getHeight()));
-    const auto flare = 1.0f - pumpGain;
-    const auto r = 3.0f + 4.0f * flare;
-    g.setGradientFill (juce::ColourGradient (signal().withAlpha (0.5f), dot.x, dot.y, signal().withAlpha (0.0f), dot.x + r * 4.0f, dot.y, true));
-    g.fillEllipse (juce::Rectangle<float> (r * 8.0f, r * 8.0f).withCentre (dot));
-    g.setColour (hot (0.4f + 0.5f * flare));
-    g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (dot));
-    screen::scanlines (g, area);
+    screen::scanlines (g, area, 0.05f);
 }
 
 } // namespace kerf::ui

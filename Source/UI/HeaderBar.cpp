@@ -199,7 +199,7 @@ void HeaderBar::resized()
     auto right = r.removeFromRight (354.0f);
 
     auto rightInt = right.toNearestInt();
-    // Symbols: [undo][redo]   [load]   [menu]   (REC, CAPTURE and RESAMPLE live in the tool row)
+    // Symbols: [undo][redo]   [load]   [menu]   (REC and RESAMPLE live in the tool row)
     menuButton.setBounds (rightInt.removeFromRight (28).withSizeKeepingCentre (28, 24));
     rightInt.removeFromRight (12);
     loadButton.setBounds (rightInt.removeFromRight (28).withSizeKeepingCentre (28, 24));
@@ -280,10 +280,7 @@ void HeaderBar::paint (juce::Graphics& g)
     // PRESET, BPM and KEY look alike: a small label (with its confidence dot) over a box.
     auto readoutBox = [&g] (juce::Rectangle<float> area)
     {
-        g.setColour (Colours::surfaceRaised);
-        g.fillRoundedRectangle (area, Metrics::radiusSmall);
-        g.setColour (Colours::hairline);
-        g.drawRoundedRectangle (area.reduced (0.5f), Metrics::radiusSmall, Metrics::hairline);
+        Face::track (g, area.reduced (0.5f)); // a small display, sunk into the header
     };
     auto readoutLabel = [&g] (juce::Rectangle<float> area, const juce::String& text)
     {

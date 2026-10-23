@@ -15,6 +15,9 @@ namespace kerf::ui
     star with turning arms. Live grains float above the disc at their pitch (SHAPE: square,
     round or comet) and shed sparks that drift out into the galaxy; RANDOM on a scale shows
     its pitches as orbits, SYNC sends rings out on the beat, FREEZE stills it all in ice.
+    GLIDE: grains trail light the way they bend, their sparks drift up or down. DETUNE: each
+    grain has two flickering twins, the ring doubles into two beating orbits. HAZE: a band of
+    fine dust circles the galaxy and glows on with the reverb's tail, sparks linger as dust.
 
     Right, CANDY: the output sound visualised: triggered oscilloscope, stereo vectorscope
     with phosphor afterglow (plus correlation), and a scrolling spectrogram. */
@@ -35,7 +38,7 @@ public:
 private:
     static constexpr int bins = 96;   // resolution across the chop
 
-    struct LiveGrain { float u, level, semis; };
+    struct LiveGrain { float u, level, semis, cents; };
 
     void animationTick (double dt) override;
     void updateBaseline();
@@ -55,7 +58,7 @@ private:
     juce::Rectangle<float> header, engineScreen, oscScreen, vectorScreen, spectroScreen;
 
     // The galaxy: grain activity and the chop's loudness round the ring, sparks, the sky.
-    struct Particle { float u = 0, radius = 1, height = 0, drift = 0, rise = 0, age = 0, life = 1, size = 1, hue = 0; };
+    struct Particle { float u = 0, radius = 1, height = 0, drift = 0, rise = 0, age = 0, life = 1, size = 1, hue = 0; bool mist = false; }; // mist: HAZE
     struct Star { float angle, radius, size, twinkle; };
     struct Meteor { juce::Point<float> from, velocity; float age = 0, life = 1; };    // in 0..1 of the screen
     struct Shockwave { float age = 0, strength = 1; };                              // a ring out over the disc on a hit
@@ -78,6 +81,8 @@ private:
     std::vector<LiveGrain> live;
     double sprayCentreU = 0.5, sprayHalfU = 0.0;
     float glow = 0.0f;
+    float haze = 0.0f;      // HAZE's tail as shown (lingers after the grains)
+    float hazeTurn = 0.0f;  // the haze clouds' slow turn round the galaxy
     float intro = 1.0f; // opening animation 0..1 (screens switch on)
     double time = 0.0;
     IdleGate idle; // rests while nothing moves

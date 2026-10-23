@@ -79,7 +79,7 @@ void FooterBar::resized()
     retrigLabel = r.removeFromLeft (52).toFloat();
     retrigger.setBounds (r.removeFromLeft (132).withSizeKeepingCentre (132, 18));
     r.removeFromLeft (20);
-    quantLabel = r.removeFromLeft (48).toFloat();
+    quantLabel = r.removeFromLeft (70).toFloat();
     quantize.setBounds (r.removeFromLeft (190).withSizeKeepingCentre (190, 18));
     r.removeFromLeft (20);
     midiArea = r.removeFromRight (56).toFloat();
@@ -94,7 +94,7 @@ void FooterBar::paint (juce::Graphics& g)
 
     drawText (g, "VOICES", voicesLabel, TextStyle::label, Colours::textDim);
     drawText (g, "RETRIG", retrigLabel, TextStyle::label, Colours::textDim);
-    drawText (g, "QUANT", quantLabel, TextStyle::label, Colours::textDim);
+    drawText (g, "QUANTIZE", quantLabel, TextStyle::label, Colours::textDim);
     const bool showStatus = shownStatus.isNotEmpty() && statusTime < 8.0;
 
     // Hints are "a  ·  b  ·  c", most important first: drop whole ones from the end until
@@ -251,7 +251,7 @@ void MainView::resized()
     }
 
     // The page tabs at the top right; the tools in the top-left corner:
-    // [play][stop] [loop][click]   CHOP: [knife][snap]  [rec][capture][resample]   EQ: the point types
+    // [play][stop] [loop][click]   CHOP: [knife][snap]  [rec][resample]   EQ: the point types
     r.removeFromTop (8);
     auto top = r.removeFromTop (24).reduced (16, 0);
     pageTabs.setBounds (top.removeFromRight (pageTabs.idealWidth()));
@@ -653,24 +653,8 @@ bool KerfAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
             return true;
         }
 
-        // Remove the selected chop's start boundary = merge it into the chop on its left.
-        const auto selected = (int) processor.getSettings().getProperty ("selectedChop", 0);
-        const auto chops = processor.getChops().getChops();
-        for (size_t i = 0; i < chops.size(); ++i)
-            if (chops[i].id == selected)
-            {
-                um.beginNewTransaction ("Remove boundary");
-                if (i > 0)
-                {
-                    processor.getChops().mergeWithNext (chops[i - 1].id);
-                    processor.getSettings().setProperty ("selectedChop", chops[i - 1].id, nullptr);
-                }
-                else if (chops.size() > 1)
-                {
-                    processor.getChops().mergeWithNext (selected);
-                }
-                return true;
-            }
+        // The selected chop (or all chops selected with Ctrl / Shift) removed, like the bin.
+        processor.deleteSelectedChops();
         return true;
     }
 

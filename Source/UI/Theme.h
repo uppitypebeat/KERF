@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <array>
 
 /** KERF design system.
 
@@ -63,6 +64,24 @@ int defaultPalette();           // Nebula
     always contrast. The first chop (in time) wears the theme's own colour; palette colours
     too close to it are skipped for the others. */
 juce::Colour chopColour (int chopId, int firstChopId);
+
+/** The synth screens (waveform, GRANULIZER, FX, TIME, EQ) are dark displays in every theme:
+    in a white-mode theme they are drawn in its dark sibling (the same accent and glow on a
+    dark sky). While a ScreenScope lives, Colours:: and lightTheme() are that dark palette;
+    a view creates one at the top of its paint() (and its tick, where it picks colours).
+    Nested scopes do nothing. */
+class ScreenScope
+{
+public:
+    ScreenScope();
+    ~ScreenScope();
+    ScreenScope (const ScreenScope&) = delete;
+    ScreenScope& operator= (const ScreenScope&) = delete;
+
+private:
+    bool active = false;
+    std::array<juce::Colour, 14> saved;
+};
 
 /** A colour as text or a thin line on the theme: lifted by `amount` on a night sky, deepened
     in white mode (where lifting would wash it out). */
@@ -164,6 +183,24 @@ void drawText (juce::Graphics& g, const juce::String& text, juce::Rectangle<floa
 
 float textWidth (const juce::String& text, TextStyle style);
 
+/** The face every button in KERF shares, flat and quiet: a fine outline at rest, a faint
+    fill under the mouse, a light wash of the accent when on. Groups of options sit in one
+    outline (the chosen one washed in the accent). */
+namespace Face
+{
+    struct State
+    {
+        bool hover = false, down = false, on = false, enabled = true;
+        juce::Colour signal; // the colour it lights in (default: the accent)
+    };
+    void key (juce::Graphics&, juce::Rectangle<float> bounds, const State&);
+    /** The outline a row of options sits in. */
+    void track (juce::Graphics&, juce::Rectangle<float> bounds);
+    /** The label colour on a key in this state. */
+    juce::Colour text (const State&);
+    constexpr float radius = 3.0f;
+}
+
 /** Look & feel for the few stock JUCE widgets we use (menus, text entry, tooltips). */
 class KerfLookAndFeel final : public juce::LookAndFeel_V4
 {
@@ -205,7 +242,7 @@ public:
 
 private:
     struct BackdropCache { juce::Image image, native; juce::Point<int> size; juce::Colour base, accent, glow; };
-    BackdropCache backdrops[2];
+    BackdropCache backdrops[4]; // panel, deep; and both again in the screens' colours (a ScreenScope)
 };
 
 } // namespace kerf::ui

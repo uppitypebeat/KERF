@@ -195,6 +195,7 @@ KerfAudioProcessor::KerfAudioProcessor()
     p.grainDrift = raw (Params::grainDrift);  p.grainShimmer = raw (Params::grainShimmer);
     p.grainShape = raw (Params::grainShape);  p.grainScale = raw (Params::grainScale);
     p.grainFreeze = raw (Params::grainFreeze); p.grainSync = raw (Params::grainSync);
+    p.grainGlide = raw (Params::grainGlide); p.grainDetune = raw (Params::grainDetune); p.grainHaze = raw (Params::grainHaze);
     p.timeSlot = raw (Params::timeSlot); p.timeMix = raw (Params::timeMix); p.timeLength = raw (Params::timeLength);
     p.grainOff = raw (Params::grainOff); p.fxOff = raw (Params::fxOff); p.eqOff = raw (Params::eqOff); p.timeOff = raw (Params::timeOff);
     for (int band = 0; band < Params::eqBands; ++band)
@@ -254,6 +255,7 @@ void KerfAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 
     engine.prepare (sampleRate);
     space.prepare (sampleRate, maxChunk);
+    haze.prepare (sampleRate);
     tone.prepare (sampleRate, maxChunk);
     dirt.prepare (sampleRate, maxChunk);
     wobble.prepare (sampleRate, maxChunk);
@@ -267,6 +269,7 @@ void KerfAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     spaceSend.setSize (2, maxChunk);
     mixBuffer.setSize (2, maxChunk);
     grainScratch.setSize (2, maxChunk);
+    hazeSend.setSize (2, maxChunk);
     chunkMidi.ensureSize (8192);
 
     masterGain.reset (sampleRate, 0.03);
@@ -281,6 +284,7 @@ void KerfAudioProcessor::releaseResources()
 {
     engine.allNotesOff (true);
     space.reset();
+    haze.reset();
     tone.reset();
     dirt.reset();
     wobble.reset();
@@ -300,8 +304,15 @@ bool KerfAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) con
     return in.isDisabled() || in == juce::AudioChannelSet::stereo() || in == juce::AudioChannelSet::mono();
 }
 
-void KerfAudioProcessor::fillGrainExtras (kerf::GrainSettings& gs, double bpm) const
+void KerfAudioProcessor::fillGrainSettings (kerf::GrainSettings& gs, double bpm) const
 {
+    gs.mix = p.grainMix->load();         gs.sizeMs = p.grainSize->load();     gs.density = p.grainDensity->load();
+    gs.spray = p.grainSpray->load();     gs.pitchRandom = p.grainPitch->load(); gs.spread = p.grainSpread->load();
+    gs.scan = p.grainScan->load();       gs.position = p.grainPosition->load();
+    gs.reverse = p.grainReverse->load();
+    gs.pitch = p.grainPitch2->load();
+    gs.drift = p.grainDrift->load();     gs.shimmer = p.grainShimmer->load();
+    gs.glide = p.grainGlide->load();     gs.detune = p.grainDetune->load();
     // SHAPE, the RANDOM scale, FREEZE and SYNC (DENSITY's knob position picks the note value).
     if (p.grainOff->load() > 0.5f)
         gs.mix = 0.0f; // the GRANULIZER tab is switched off
@@ -314,6 +325,11 @@ void KerfAudioProcessor::fillGrainExtras (kerf::GrainSettings& gs, double bpm) c
     if (p.grainSync->load() > 0.5f)
         if (auto* density = parameters.getParameter (Params::grainDensity))
             gs.syncBeats = GrainSync::beats[GrainSync::indexFor (density->convertTo0to1 (p.grainDensity->load()))];
+}
+
+float KerfAudioProcessor::hazeAmount() const
+{
+    return p.grainOff->load() > 0.5f ? 0.0f : p.grainHaze->load();
 }
 
 double KerfAudioProcessor::getEffectiveTempo() const
@@ -433,6 +449,7 @@ void KerfAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int sta
 
     mixBuffer.clear (0, num);
     spaceSend.clear (0, num);
+    hazeSend.clear (0, num);
 
     // --- Voices -------------------------------------------------------------------
     EngineSettings es;
@@ -457,18 +474,12 @@ void KerfAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int sta
     TransportInfo chunkTransport = transport;
     chunkTransport.ppqAtBlockStart += start / (preparedRate.load (std::memory_order_relaxed) * 60.0 / transport.bpm);
 
-    auto& gs = es.voice.grain;
-    gs.mix = p.grainMix->load();         gs.sizeMs = p.grainSize->load();     gs.density = p.grainDensity->load();
-    gs.spray = p.grainSpray->load();     gs.pitchRandom = p.grainPitch->load(); gs.spread = p.grainSpread->load();
-    gs.scan = p.grainScan->load();       gs.position = p.grainPosition->load();
-    gs.reverse = p.grainReverse->load();
-    gs.pitch = p.grainPitch2->load();
-    gs.drift = p.grainDrift->load();     gs.shimmer = p.grainShimmer->load();
-    fillGrainExtras (gs, transport.bpm > 0.0 ? transport.bpm : getEffectiveTempo());
+    fillGrainSettings (es.voice.grain, transport.bpm > 0.0 ? transport.bpm : getEffectiveTempo());
 
     const VoiceBusses busses { mixBuffer.getWritePointer (0), mixBuffer.getWritePointer (1),
                                spaceSend.getWritePointer (0), spaceSend.getWritePointer (1),
-                               grainScratch.getWritePointer (0), grainScratch.getWritePointer (1) };
+                               grainScratch.getWritePointer (0), grainScratch.getWritePointer (1),
+                               hazeSend.getWritePointer (0), hazeSend.getWritePointer (1) };
     // Pattern: follows the host transport while it plays, otherwise its own preview clock.
     // PUMP follows the same beat: the host's, the pattern preview's, or its own clock.
     // Playback starting here (a chop, the sample, the pattern - nothing played before): the
@@ -549,6 +560,10 @@ void KerfAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int sta
     const auto ss = PingPongDelay::fromMacro (fxOn ? p.space->load() : 0.0f, tempo);
     space.process (spaceSend.getReadPointer (0), spaceSend.getReadPointer (1),
                    mixBuffer.getWritePointer (0), mixBuffer.getWritePointer (1), num, ss);
+    // --- HAZE: the grains' own reverb -----------------------------------------------
+    haze.process (hazeSend.getReadPointer (0), hazeSend.getReadPointer (1),
+                  mixBuffer.getWritePointer (0), mixBuffer.getWritePointer (1), num, hazeAmount());
+    hazeLevelForUi.store (haze.getLevel(), std::memory_order_relaxed);
 
     // --- TONE ---------------------------------------------------------------------
     juce::AudioBuffer<float> view (mixBuffer.getArrayOfWritePointers(), 2, 0, num);
@@ -569,11 +584,11 @@ void KerfAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int sta
         if (audioSnapshot != nullptr && ! tabOff)
             curves = slot > 0 ? &audioSnapshot->timeSlots[(size_t) juce::jlimit (1, TimeFactory::numSlots, slot) - 1]
                               : (audioSnapshot->ownTimeOn ? &audioSnapshot->ownTime : nullptr);
-        // The screen's playhead runs with the song or the pattern preview and, stopped,
-        // stands where the host is (the audio clock runs on for live playing).
+        // The screen's playhead runs with the song, the pattern preview or a chop playing (it
+        // sounds through TIME on the audio clock); with nothing playing it stands where the host is.
         const TimeShaper::Settings ts { curves,
                                         p.timeMix->load(), getTimeCycleBeats(),
-                                        transport.isPlaying || lastPatternRun, chunkTransport.ppqAtBlockStart };
+                                        transport.isPlaying || lastPatternRun || engine.getNumActiveVoices() > 0, chunkTransport.ppqAtBlockStart };
         timeShaper.process (view, num, ts, pumpPpq, fallbackTempo);
     }
 
@@ -591,12 +606,6 @@ void KerfAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int sta
     spectrum.push (l, r, num);
     outputTap.push (l, r, num);
 
-    // CAPTURE: record KERF's own output.
-    {
-        const float* outs[2] = { l, r };
-        recorder.process (AudioRecorder::Source::output, outs, 2, num, chunkTransport, fallbackTempo);
-    }
-
     const auto outChannels = getTotalNumOutputChannels();
     if (outChannels >= 2)
     {
@@ -609,7 +618,7 @@ void KerfAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int sta
         buffer.addFrom (0, start, mixBuffer, 1, 0, num, 0.5f);
     }
 
-    // The metronome: after CAPTURE and the spectrum, so it is heard but never recorded. Always
+    // The metronome: after the spectrum, so it is heard but never resampled. Always
     // at KERF's BPM (the header's), on fixed beats: a chop or the sample from PLAY clicks where
     // it passes the sample's beat lines (noted by the voices above); with the song, the beats
     // of KERF's BPM from the song's start; with the pattern, the pattern's own beat.
@@ -928,6 +937,10 @@ bool KerfAudioProcessor::writePatternMidi (const juce::File& target) const
     const auto feel = groove();
     auto data = std::make_unique<PatternData>(); // large: not on the stack
     fillPatternData (*data);
+    // Every note as long as its step (to the next hit): in the piano roll, notes join up
+    // end to start. Where one ends and the same note starts again, the end is written first.
+    struct Note { double tick; bool on; int note; juce::uint8 velocity; };
+    std::vector<Note> notes;
     for (int i = 0; i < data->numEvents; ++i)
         if (const auto note = PatternPlayer::noteFor (*data, i, data->events[(size_t) i].step); note >= 0)
         {
@@ -938,12 +951,15 @@ bool KerfAudioProcessor::writePatternMidi (const juce::File& target) const
             {
                 const auto& hit = hits[(size_t) h];
                 const auto velocity = (juce::uint8) juce::jlimit (1, 127, juce::roundToInt (hit.velocity * 127.0f));
-                const auto on = std::max (0.0, hit.on * ticksPerStep);
-                const auto off = std::max (on + 1.0, hit.off * ticksPerStep);
-                seq.addEvent (juce::MidiMessage::noteOn (1, note, velocity), on);
-                seq.addEvent (juce::MidiMessage::noteOff (1, note), off);
+                const auto on = std::round (std::max (0.0, hit.on * ticksPerStep));
+                const auto off = std::max (on + 1.0, std::round (hit.end * ticksPerStep));
+                notes.push_back ({ on, true, note, velocity });
+                notes.push_back ({ off, false, note, 0 });
             }
         }
+    std::stable_sort (notes.begin(), notes.end(), [] (const Note& a, const Note& b) { return a.tick < b.tick || (a.tick == b.tick && ! a.on && b.on); });
+    for (const auto& n : notes)
+        seq.addEvent (n.on ? juce::MidiMessage::noteOn (1, n.note, n.velocity) : juce::MidiMessage::noteOff (1, n.note), n.tick);
 
     // End of track at the pattern length, so the clip is exactly the pattern in the DAW.
     seq.addEvent (juce::MidiMessage::endOfTrack(), (double) (pattern.getNumSteps() * ticksPerStep));
@@ -1004,7 +1020,7 @@ void KerfAudioProcessor::installRecording (juce::AudioBuffer<float>&& audio, Aud
     }
 
     const auto stamp = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H%M%S");
-    const auto name = juce::String (source == AudioRecorder::Source::input ? "REC " : "CAPTURE ") + stamp;
+    const auto name = "REC " + stamp;
     const auto file = getRecordingsFolder().getChildFile (name + ".wav");
 
     // Keep a copy for the file writer; the sample takes ownership of the original.
@@ -1017,8 +1033,8 @@ void KerfAudioProcessor::installRecording (juce::AudioBuffer<float>&& audio, Aud
     }
 
     ++loadGeneration;
-    beginNewSample (result.sample, nullptr, source == AudioRecorder::Source::input ? "Record" : "Capture");
-    setStatusMessage ((source == AudioRecorder::Source::input ? "Recorded " : "Captured ") + juce::String (result.sample->getLengthSeconds(), 2)
+    beginNewSample (result.sample, nullptr, "Record");
+    setStatusMessage ("Recorded " + juce::String (result.sample->getLengthSeconds(), 2)
                       + " s  -  saved to Documents/KERF/Recordings");
 
     jobs.addJob ([toWrite, file, rate]
@@ -1236,6 +1252,7 @@ void KerfAudioProcessor::renderAsync (const juce::File& target, int bitDepth, in
         double rate, bpm;
         EngineSettings engine;
         PingPongDelay::Settings space;
+        float haze = 0.0f;
         ToneProcessor::Settings tone;
         DirtProcessor::Settings dirt;
         WobbleProcessor::Settings wobble;
@@ -1266,14 +1283,8 @@ void KerfAudioProcessor::renderAsync (const juce::File& target, int bitDepth, in
     job->engine.voice.globalSemitones = p.pitch->load();
     job->engine.voice.timeRatio = (p.stretchMode->load() < 0.5f && p.tempoSync->load() > 0.5f && info.sourceBpm > 0.0)
                                       ? juce::jlimit (0.25, 4.0, job->bpm / info.sourceBpm) : 1.0;
-    auto& gs = job->engine.voice.grain;
-    gs.mix = p.grainMix->load(); gs.sizeMs = p.grainSize->load(); gs.density = p.grainDensity->load();
-    gs.spray = p.grainSpray->load(); gs.pitchRandom = p.grainPitch->load(); gs.spread = p.grainSpread->load();
-    gs.scan = p.grainScan->load(); gs.position = p.grainPosition->load();
-    gs.reverse = p.grainReverse->load();
-    gs.pitch = p.grainPitch2->load();
-    gs.drift = p.grainDrift->load();     gs.shimmer = p.grainShimmer->load();
-    fillGrainExtras (gs, job->bpm);
+    fillGrainSettings (job->engine.voice.grain, job->bpm);
+    job->haze = hazeAmount();
     const auto fxOn = p.fxOff->load() < 0.5f; // tabs switched off render as they sound
     job->space = PingPongDelay::fromMacro (fxOn ? p.space->load() : 0.0f, job->bpm);
     job->tone = { fxOn ? p.filter->load() : 0.0f, p.resonance->load() };
@@ -1328,8 +1339,10 @@ void KerfAudioProcessor::renderAsync (const juce::File& target, int bitDepth, in
         pumpFx.prepare (job->rate, block);
         TimeShaper timeFx;
         timeFx.prepare (job->rate);
+        GrainHaze hazeFx;
+        hazeFx.prepare (job->rate);
 
-        juce::AudioBuffer<float> out (2, totalFrames), mix (2, block), send (2, block), scratch (2, block);
+        juce::AudioBuffer<float> out (2, totalFrames), mix (2, block), send (2, block), scratch (2, block), hazeIn (2, block);
         out.clear();
         juce::MidiBuffer midi;
         midi.ensureSize (4096);
@@ -1339,6 +1352,7 @@ void KerfAudioProcessor::renderAsync (const juce::File& target, int bitDepth, in
             const auto n = std::min (block, totalFrames - pos);
             mix.clear();
             send.clear();
+            hazeIn.clear();
             midi.clear();
 
             const auto ppq = pos / job->rate * job->bpm / 60.0;
@@ -1356,10 +1370,12 @@ void KerfAudioProcessor::renderAsync (const juce::File& target, int bitDepth, in
             }
 
             const VoiceBusses busses { mix.getWritePointer (0), mix.getWritePointer (1), send.getWritePointer (0), send.getWritePointer (1),
-                                       scratch.getWritePointer (0), scratch.getWritePointer (1) };
+                                       scratch.getWritePointer (0), scratch.getWritePointer (1),
+                                       hazeIn.getWritePointer (0), hazeIn.getWritePointer (1) };
             TransportInfo t { true, job->bpm, ppq, 4.0 };
             engine.process (busses, n, midi, job->engine, t);
             delay.process (send.getReadPointer (0), send.getReadPointer (1), mix.getWritePointer (0), mix.getWritePointer (1), n, job->space);
+            hazeFx.process (hazeIn.getReadPointer (0), hazeIn.getReadPointer (1), mix.getWritePointer (0), mix.getWritePointer (1), n, job->haze);
             juce::AudioBuffer<float> view (mix.getArrayOfWritePointers(), 2, 0, n);
             dirtFx.process (view, n, job->dirt);
             toneFx.process (view, n, job->tone);
@@ -2293,7 +2309,7 @@ int KerfAudioProcessor::addEqPoint (float freq, float gainDb, EqProcessor::Type 
 int KerfAudioProcessor::addEqPointInGap (EqProcessor::Type type)
 {
     // The middle (in octaves) of the widest gap between existing points.
-    std::vector<float> used { 20.0f, 20000.0f };
+    std::vector<float> used { 20.0f, 30000.0f };
     for (const auto& b : eqSettings().bands)
         if (b.on)
             used.push_back (b.freq);

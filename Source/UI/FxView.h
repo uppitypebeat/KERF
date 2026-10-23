@@ -6,37 +6,38 @@
 namespace kerf::ui
 {
 
-/** FX view, in the same synth-display style as GRANULIZER (dark glowing screens).
+/** FX view: one big screen, the WORMHOLE. You fly through a tunnel of rings; each ring is
+    the output spectrum at the moment it was born (lows at the bottom, highs at the top, the
+    same on both sides), born in the light at the far end and rushing past you. Stars streak
+    by at the speed of the flight. Every effect has its own, clearly visible part:
 
-    Left, FX CHAIN: a 3D landscape of the output spectrum (low to high across, time going
-    back to the horizon). Every effect that is on changes it:
-      SPACE   ghost echoes of the front ridge, bouncing left / right (ping-pong)
-      DIRT    WARM saturates (soft, hot glow), FUZZ clips (flat tops, sparks), CRUSH steps
-      TONE    a wall of light at the cutoff; what it removes is darkened; resonance peak
-      WOBBLE  the landscape wavers (TAPE: slow and uneven, CHORUS: even, doubled image)
-      PUMP    the landscape breathes with the pump: dims on the dip, glows on the swell,
-              and a pulse rolls back over it on every beat (or 8th, 16th)
-
-    Right: one small screen per effect with its own live animation: a ball bouncing between
-    the speakers (ping-pong echoes), transfer curve, filter response, LFO trace, and the
-    pump's level curve over a bar with the beat running along it. */
+      ECHO    every ring drags ghost rings behind it, thrown left and right (ping-pong)
+      DIRT    WARM: the rings glow hot and thick. FUZZ: flat-topped, crackling rings that
+              spray sparks. CRUSH: the rings break into hard-edged polygons
+      FILTER  a string of lights runs down both walls at the cutoff; what the filter removes
+              goes dark (low-pass: the top of the tunnel, high-pass: the bottom)
+      WOBBLE  the tunnel bends and snakes (TAPE: slow and uneven, CHORUS: even, and every
+              ring doubled)
+      PUMP    the tunnel contracts on every pump, the light at the end flashes and the flight
+              surges */
 class FxView final : public juce::Component, private AnimationClock::Client
 {
 public:
     FxView (KerfAudioProcessor& processor, AnimationClock& clock);
     ~FxView() override;
 
-    /** Opening animation: the screens switch on one after another. */
+    /** Opening animation: the screen switches on. */
     void playIntro() { intro = 0.0f; repaint(); }
-    /** Nothing moving: the view has stopped repainting (the screenshot tool checks it). */
+    /** Nothing moving (the screenshot tool checks it). */
     bool isResting() const noexcept { return idle.quiet >= IdleGate::settleSeconds; }
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
-    static constexpr int bins = 96;   // = SpectrumAnalyzer::numBands
-    static constexpr int rows = 28;   // depth of the landscape
+    static constexpr int bins = 96;      // = SpectrumAnalyzer::numBands
+    static constexpr int points = 96;    // points round a ring
+    static constexpr int maxRings = 34;
 
     struct Settings
     {
@@ -45,38 +46,43 @@ private:
         double delaySeconds = 0.25;
         float feedback = 0.0f;
     };
+    struct Ring { std::array<float, bins> spectrum {}; float depth = 1.0f; };   // depth: 0 here .. 1 at the far end
+    struct Star { float angle = 0.0f, depth = 1.0f, speed = 1.0f, size = 1.0f; };
+    struct Spark { juce::Point<float> pos, velocity; float age = 0.0f, life = 0.5f; };
 
     void animationTick (double dt) override;
     Settings readSettings() const;
-    float shapeHeight (float h, int bin) const; // DIRT applied to a ridge height
+    float shapeHeight (float h) const;   // DIRT applied to a ring's height
+    float heightAt (const Ring& ring, float u) const; // the ring's spectrum at u (0 bottom .. 1 top)
 
-    void paintChain (juce::Graphics&, juce::Rectangle<float> screen);
-    void paintSpace (juce::Graphics&, juce::Rectangle<float> screen);
-    void paintDirt (juce::Graphics&, juce::Rectangle<float> screen);
-    void paintTone (juce::Graphics&, juce::Rectangle<float> screen);
-    void paintWobble (juce::Graphics&, juce::Rectangle<float> screen);
-    void paintPump (juce::Graphics&, juce::Rectangle<float> screen);
-    void moduleFrame (juce::Graphics&, juce::Rectangle<float> screen, const juce::String& label,
-                      const juce::String& value, bool on) const;
+    // The tunnel's geometry: where the ring at `depth` is centred (WOBBLE bends the tunnel)
+    // and how large it is (perspective).
+    juce::Point<float> centreAt (float depth) const;
+    float radiusAt (float depth) const;
+    juce::Path ringPath (const Ring& ring, float depth, juce::Point<float> offset, bool passBand, bool& any) const;
+
+    void paintTunnel (juce::Graphics&, juce::Rectangle<float> screen);
 
     KerfAudioProcessor& processor;
     AnimationClock& clock;
 
-    juce::Rectangle<float> header, chainScreen, spaceScreen, dirtScreen, toneScreen, wobbleScreen, pumpScreen;
+    juce::Rectangle<float> header, tunnelScreen;
 
-    std::array<std::array<float, bins>, rows> history {};
     std::array<float, bins> current {};
-    int newestRow = 0, tickCount = 0;
+    std::vector<Ring> rings;
+    std::vector<Star> stars;
+    std::vector<Spark> sparks;
     Settings s;
     juce::Random random { 0x46582121 };
-    float level = 0.0f;   // output level (smoothed)
-    float sample = 0.0f;  // latest output sample (for the DIRT transfer dot)
+    float level = 0.0f;      // output level (smoothed)
+    float flash = 0.0f;      // PUMP's flash at the far end
+    float speed = 0.0f;      // the flight's speed (depth per second)
+    float spawn = 0.0f;      // distance flown since the last ring
     double time = 0.0;
-    double motion = 0.0;   // WOBBLE's clock: runs only while something plays (from 0 at each start)
-    bool wasPlaying = false;
-    IdleGate idle; // rests while nothing moves
-    double pumpPpq = 0.0;  // the beat the PUMP follows
-    float pumpGain = 1.0f; // its level right now (0..1)
+    double motion = 0.0;     // WOBBLE's clock: runs only while something plays (it goes on from where it stood)
+    IdleGate idle;
+    double pumpPpq = 0.0;    // the beat the PUMP follows
+    float pumpGain = 1.0f;   // its level right now (0..1)
     float intro = 1.0f;
 };
 

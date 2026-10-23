@@ -11,7 +11,7 @@ symbol, top right.
 | Loop, metronome | LOOP repeats the chop until stopped. The METRONOME clicks on the beats at KERF's BPM (the header's): with a chop or the sample on the sample's beat lines (where you start does not move them), with the song from its start, with the pattern on its beat. Never recorded. Both are on the CHOP page |
 | Pads | Every chop is a pad on its own key from the root up (at most one chop per key). Click a pad, play your keyboard, or drag a pad into the DAW (audio; Ctrl: MIDI) |
 | Select several chops | **Ctrl + click** (Cmd on a Mac) chops in the waveform or pads, **Ctrl + drag** a box over chops in the waveform, **Shift + click** for every chop in between, **Ctrl+A** for all: every knob, mode, REVERSE, CHOKE and send you change then goes to all of them (one undo step). A plain click selects one again |
-| Delete chops | The bin in the toolbar deletes the selected chops (all of them: one chop over the whole sample again). Ctrl+Z brings them back |
+| Delete chops | The bin in the toolbar or the Delete key deletes the selected chops (all of them: one chop over the whole sample again). Ctrl+Z brings them back |
 | Queue a chop | While a chop plays (CHOP), click another: it plays as soon as the first one ends |
 | Split | Double-click the waveform, or use the KNIFE (K) and click |
 | Move a boundary | Drag it. SNAP (magnet) snaps to transients and the grid; **Shift** = no snap; **Alt** = move only this chop's edge |
@@ -19,15 +19,16 @@ symbol, top right.
 | Zoom | Mouse wheel over the waveform, +/−, or **F** to fit. In the overview strip, drag the window's ends to zoom and its middle to scroll |
 | Pages | Tabs at the top right: **CHOP**, **GRANULIZER**, **FX**, **TIME**, **EQ**. A quick double-click switches a page off (it is veiled and its controls rest); again switches it on |
 | Remove the sample | Right-click the waveform: *Remove the sample from KERF* (Ctrl+Z brings it back) |
+| GRANULIZER | Turns the chops into clouds of grains. CLOUD: GRAINS (how much of them you hear), DENSITY, SIZE, SHAPE (SYNC: grains on note values). MOTION: SPEED (how fast they move through the chop), POSITION, SPRAY, DRIFT (FREEZE holds it). PITCH: PITCH, RANDOM (on a scale), DETUNE (a wide unison), GLIDE (each grain bends up or down while it plays), SHIMMER. COLOUR: SPREAD, REVERSE, HAZE (a long, soft reverb on the grains only), CHOP AMT (how much of the grains this chop gets). Grains pitched up stay clean (no aliasing), a very dense cloud never clips |
 | SEQ | PADS / SEQ on the left of the pads: a step pattern of chops, 1–8 bars, with swing, humanize, repeats, chance and slides. Drag a step to the right to merge the next steps into one long note. The die next to CLEAR writes a pattern from your chops like a producer would: it listens to them (kick, snare, hat, tones and their pitch), gives the bars a form (AABA, ABAB, AAAB ...) with a motif that comes back changed, a density curve, transitions at phrase ends and an ending - using a few of pitch, ratchets, ghost notes, held notes, slides and scattered chops per roll, never all at once. Melodies stay in the key; every roll is new. Right-click it for a MODE (Balanced, Groove, Choppy, Melodic, Texture, Minimal, Chaos) and a STYLE (or Auto). The result is an ordinary pattern: edit it, Ctrl+Z brings the old one back. Export as WAV, or drag as audio / MIDI |
-| TIME | Draw your own TIME and VOLUME curves right away (click, drag, double-click, Shift: free), or start from one of 60 presets in three banks (A tempo and tape, B repeats and stutters, C gates and volume). Click a preset to select it; drawing then changes that preset, RESET (next to its name) brings it back. Clicking the selected preset again deselects it and resets its curves: your own curves play again |
+| TIME | Draw your own TIME and VOLUME curves right away (click, drag, double-click, Shift: free), or start from one of 60 SHAPES in three banks (A tempo and tape, B repeats and stutters, C gates and volume). Click a shape to select it; drawing then changes that shape, RESET (next to its name) brings it back. Clicking the selected shape again deselects it and resets its curves: your own curves play again |
 | EQ | Double-click to add the point shown or remove one (Delete also removes the selected one). The point types are the buttons at the top left; right-click a point to bypass it |
-| Record | REC records the input, CAPTURE records KERF's own output, and RESAMPLE renders the chops and the pattern into a new sample (CHOP page) |
-| Presets | In the header: 66 factory presets in 8 categories, your own (Save as...), and A / B to compare two versions |
+| Record | REC records the input (audio routed in from the DAW) and RESAMPLE renders the chops and the pattern into a new sample (CHOP page) |
+| Presets | In the header: 77 factory presets in 8 categories, your own (Save as...), and A / B to compare two versions |
 | BPM / KEY | Detected automatically. Drag, type or use the wheel on BPM, or pick a key; AUTO brings back the detected one |
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y. Covers every knob, button and menu, chop edits, pads, pattern, presets and BPM |
 | Theme | Click the **KERF** logo for the next theme: Nebula (the default), Aurora, Ember (night skies), Daylight, Glacier, Bloom (white mode) |
-| Right-click a chop | Play mode, reverse, choke group, MIDI note, merge, delete |
+| Right-click a chop (waveform) | Its sound first (play mode, reverse, choke group, MIDI note), then split, merge with the next chop and delete, then zoom; removing the sample comes last |
 | Knobs | Drag (Shift: fine) or use the wheel. A knob rests briefly on its default and its marks as you drag past (Shift: it doesn't). Double-click the value to type it; double-click the knob for its default |
 | Updates | KERF checks for a new version when it opens. If there is one, the menu button (top right) pulses until you open the menu, and "Check for updates" has a dot; DOWNLOAD there fetches the installer |
 
@@ -45,5 +46,5 @@ KERF's own playback (PLAY, the pattern) stops when the DAW starts playing.
 ## Getting DAW audio into KERF (REC)
 
 An instrument plugin only receives audio from other tracks if the DAW routes it there.
-In FL Studio, that is the mixer's sidechain routing into KERF's input. CAPTURE and
-RESAMPLE need no routing.
+In FL Studio, that is the mixer's sidechain routing into KERF's input. RESAMPLE needs
+no routing.

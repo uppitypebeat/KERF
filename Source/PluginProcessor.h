@@ -19,6 +19,7 @@
 #include "Effects/WobbleProcessor.h"
 #include "Effects/EqProcessor.h"
 #include "Effects/PumpProcessor.h"
+#include "Effects/GrainHaze.h"
 #include "Effects/Metronome.h"
 #include "Analysis/WaveformCache.h"
 #include "Analysis/TransientDetector.h"
@@ -222,6 +223,7 @@ public:
     kerf::PumpProcessor::Settings pumpSettings() const noexcept;
     /** The beat position the PUMP follows (host, pattern or its own clock), for the UI. */
     double getPumpPpq() const noexcept     { return pumpPpqForUi.load (std::memory_order_relaxed); }
+    float getHazeLevel() const noexcept    { return hazeLevelForUi.load (std::memory_order_relaxed); } // HAZE's tail, for the galaxy
     int getPatternStep() const noexcept { return patternPlayer.getCurrentStep(); }
 
     // Recording / capture (Milestone 7)
@@ -439,7 +441,7 @@ private:
     kerf::EqProcessor eq;
     kerf::PumpProcessor pump;
     kerf::TimeShaper timeShaper;
-    kerf::Metronome metronome;                 // the toolbar's click (after CAPTURE: heard, never recorded)
+    kerf::Metronome metronome;                 // the toolbar's click (added last: heard, never resampled)
     double pumpFreePpq = 0.0; // audio thread: the PUMP clock while nothing else runs
     bool wasPlayingAnything = false; // audio thread: something played in the last chunk
     kerf::SpectrumAnalyzer spectrum;
@@ -454,7 +456,8 @@ private:
     juce::String statusMessage;
     void pollRecorder();
     void installRecording (juce::AudioBuffer<float>&& audio, kerf::AudioRecorder::Source source);
-    juce::AudioBuffer<float> spaceSend, mixBuffer, grainScratch;
+    juce::AudioBuffer<float> spaceSend, mixBuffer, grainScratch, hazeSend;
+    kerf::GrainHaze haze; // HAZE: the grains' own reverb
     juce::MidiBuffer chunkMidi;
     kerf::TransportInfo transport;
     bool firstChunk = true;
@@ -471,6 +474,7 @@ private:
 
     // Audio -> UI readouts
     std::atomic<double> hostBpm { 120.0 }, hostPpq { 0.0 }, pumpPpqForUi { 0.0 };
+    std::atomic<float> hazeLevelForUi { 0.0f };
     std::atomic<bool> hostPlaying { false }, hostHasTempo { false };
     std::atomic<float> outputLevel { 0.0f };
     std::atomic<int> midiNoteCounter { 0 };
@@ -492,6 +496,7 @@ private:
         std::atomic<float>* grainDrift = nullptr; std::atomic<float>* grainShimmer = nullptr;
         std::atomic<float>* grainShape = nullptr; std::atomic<float>* grainScale = nullptr;
         std::atomic<float>* grainFreeze = nullptr; std::atomic<float>* grainSync = nullptr;
+        std::atomic<float>* grainGlide = nullptr; std::atomic<float>* grainDetune = nullptr; std::atomic<float>* grainHaze = nullptr;
         std::atomic<float>* timeSlot = nullptr; std::atomic<float>* timeMix = nullptr; std::atomic<float>* timeLength = nullptr;
         std::atomic<float>* grainOff = nullptr; std::atomic<float>* fxOff = nullptr; std::atomic<float>* eqOff = nullptr; std::atomic<float>* timeOff = nullptr;
         std::array<std::array<std::atomic<float>*, 6>, kerf::Params::eqBands> eq {}; // on, type, freq, gain, q, bypass
@@ -510,7 +515,8 @@ private:
     std::atomic<int64_t> sampleCursor { 0 };
     std::atomic<double> preparedRate { 48000.0 }; // from prepareToPlay: what the engine and effects run at
     void rememberPresetSound (const juce::String& name);
-    void fillGrainExtras (kerf::GrainSettings& gs, double bpm) const; // audio thread
+    void fillGrainSettings (kerf::GrainSettings& gs, double bpm) const; // every GRANULIZER setting for a block (audio thread, export)
+    float hazeAmount() const; // HAZE as heard (0 with the GRANULIZER tab off)
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (KerfAudioProcessor)
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KerfAudioProcessor)

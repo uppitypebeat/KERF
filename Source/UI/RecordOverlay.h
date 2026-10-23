@@ -6,7 +6,7 @@
 namespace kerf::ui
 {
 
-/** Shown over the waveform while REC or CAPTURE is active: state, time, input level,
+/** Shown over the waveform while REC is active: state, time, input level,
     STOP (keep the take) and CANCEL (discard). */
 class RecordOverlay final : public juce::Component, private AnimationClock::Client
 {
@@ -28,10 +28,10 @@ private:
     float appear = 0.0f;
 };
 
-/** Opens the REC / CAPTURE length menu, or stops an active recording. */
+/** Opens the REC length menu, or stops an active recording. */
 void handleRecordButton (KerfAudioProcessor& processor, AudioRecorder::Source source, juce::Component& anchor);
 
-/** The recording symbols in the tool row: REC (DAW input), CAPTURE (KERF's output) and
+/** The recording symbols in the tool row: REC (DAW input) and
     RESAMPLE (the pattern rendered into a new sample). On every page. */
 class RecordTools final : public juce::Component, private AnimationClock::Client
 {
@@ -40,14 +40,14 @@ public:
     ~RecordTools() override;
     void resized() override;
 
-    static constexpr int idealWidth = 3 * 26 + 2 * 4;
+    static constexpr int idealWidth = 2 * 26 + 4;
 
 private:
-    void animationTick (double) override; // lights REC / CAPTURE while recording
+    void animationTick (double) override; // lights REC while recording
 
     KerfAudioProcessor& processor;
     AnimationClock& clock;
-    IconButton recButton { "Rec", IconButton::Icon::record, false, true }, captureButton { "Capture", IconButton::Icon::capture, false, true };
+    IconButton recButton { "Rec", IconButton::Icon::record, false, true };
     IconButton resampleButton { "Resample", IconButton::Icon::resample, false };
 };
 

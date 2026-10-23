@@ -110,6 +110,7 @@ set(KERF_CORE_SOURCES
     Source/Effects/EqProcessor.cpp
     Source/Effects/PumpProcessor.cpp
     Source/Effects/TimeShaper.cpp
+    Source/Effects/GrainHaze.cpp
     Source/Parameters.cpp
     Source/FactoryPresets.cpp
     Source/UpdateCheck.cpp)

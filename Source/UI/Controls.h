@@ -24,12 +24,12 @@ private:
     juce::ListenerList<Client> clients;
 };
 
-/** Lets a busy view rest: it keeps repainting while something happens (sound, a parameter
-    moving, the mouse, an animation running) and for a moment after, then stops until the
-    next thing happens. An open editor at rest costs (almost) nothing. */
+/** A view's frame clock. It tracks how long nothing has happened (sound, a parameter moving,
+    the mouse, an animation running), but the view always repaints: the animations never go
+    to sleep (no standby after a few quiet seconds). */
 struct IdleGate
 {
-    /** Call once per frame; true = repaint this frame. */
+    /** Call once per frame; true = repaint this frame (always). */
     bool update (double dt, bool active, uint32_t changes) noexcept
     {
         if (active || changes != lastChanges)
@@ -37,7 +37,7 @@ struct IdleGate
         else
             quiet += dt;
         lastChanges = changes;
-        return quiet < settleSeconds;
+        return true;
     }
     void wake() noexcept { quiet = 0.0; }
 
@@ -152,7 +152,7 @@ private:
 class IconButton final : public juce::Button
 {
 public:
-    enum class Icon { magnet, knife, undo, redo, record, capture, load, plus, minus, play, stop, pause, loop, metronome, trash, resample, previous, next, menu, dice };
+    enum class Icon { magnet, knife, undo, redo, record, load, plus, minus, play, stop, pause, loop, metronome, trash, resample, previous, next, menu, dice };
 
     /** `toggle`: stays on when clicked (tools). `recordStyle`: the record colour when on. */
     IconButton (const juce::String& name, Icon icon, bool toggle = true, bool recordStyle = false);

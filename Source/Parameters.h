@@ -33,6 +33,9 @@ namespace kerf::Params
     inline constexpr auto grainScale    = "grain_scale";       // random pitch: free, octaves, fifths, chord
     inline constexpr auto grainFreeze   = "grain_freeze";      // hold the read head
     inline constexpr auto grainSync     = "grain_sync";        // DENSITY as note values at the tempo
+    inline constexpr auto grainGlide    = "grain_glide";       // every grain bends up (+) or down (-) while it plays
+    inline constexpr auto grainDetune   = "grain_detune";      // a fine random detune per grain (unison)
+    inline constexpr auto grainHaze     = "grain_haze";        // a long, soft reverb on the grains only
     inline constexpr auto timeSlot      = "time_slot";         // TIME: off or one of 60 slots
     inline constexpr auto timeMix       = "time_mix";
     inline constexpr auto timeLength    = "time_length";       // the cycle: 1/2, 1 or 2 bars

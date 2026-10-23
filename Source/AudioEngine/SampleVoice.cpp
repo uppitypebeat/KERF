@@ -354,18 +354,27 @@ void SampleVoice::render (const VoiceBusses& out, int startSample, int numSample
 
         // --- Grain crossfade (equal power) ------------------------------------
         const float grain = smoothGrain.getNextValue();
+        float grainL = 0.0f, grainR = 0.0f;
         if (grainsOn)
         {
             const float dryGain = std::cos (grain * juce::MathConstants<float>::halfPi);
             const float wetGain = std::sin (grain * juce::MathConstants<float>::halfPi);
-            l = l * dryGain + out.scratchL[idx] * wetGain;
-            r = r * dryGain + out.scratchR[idx] * wetGain;
+            grainL = out.scratchL[idx] * wetGain;
+            grainR = out.scratchR[idx] * wetGain;
+            l = l * dryGain + grainL;
+            r = r * dryGain + grainR;
         }
 
         // --- Gain, pan, output ---------------------------------------------
         const float amp = envelope * endGain * smoothGain.getNextValue();
-        const float outL = l * amp * smoothPanL.getNextValue();
-        const float outR = r * amp * smoothPanR.getNextValue();
+        const float panL = smoothPanL.getNextValue(), panR = smoothPanR.getNextValue();
+        const float outL = l * amp * panL;
+        const float outR = r * amp * panR;
+        if (grainsOn && out.hazeL != nullptr) // HAZE: the grains alone, as loud and placed as heard
+        {
+            out.hazeL[idx] += grainL * amp * panL;
+            out.hazeR[idx] += grainR * amp * panR;
+        }
         const float send = smoothSpace.getNextValue();
 
         out.dryL[idx] += outL;

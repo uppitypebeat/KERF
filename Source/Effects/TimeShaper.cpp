@@ -79,24 +79,24 @@ namespace TimeFactory
     {
         // The order the slots are built in below (the shapes refer to each other by it).
         const char* const builtNames[numSlots] = { "HALF TIME", "TAPE STOP", "SPIN UP", "STUTTER 8", "STUTTER 16", "REVERSE",
-                                                   "SCRATCH", "SLOW DOWN", "BEAT REPEAT", "DRAG", "GATE 16", "SIDECHAIN",
-                                                   "STUTTER 3", "ROLL", "REWIND", "WARBLE", "GLITCH", "GATE 332", "SWELL", "PUMP 4",
+                                                   "SCRATCH", "SLOW DOWN", "BEAT REPEAT", "DRAG", "GATE 16", "STAIRS",
+                                                   "STUTTER 3", "ROLL", "REWIND", "ARP UP", "GLITCH", "GATE 332", "SWELL", "GATE RAMP",
                                                    "HALF FIRST", "SLOWMO", "QUARTER", "STUTTER 4", "STUTTER 32", "ROLL DOWN", "ROLL 3", "FILL 16", "BOUNCE", "REVERSE 8",
                                                    "REV HALF", "ECHO BEAT", "REPEAT 2", "DOTTED", "POLY 3", "SHUFFLE", "LAZY", "BRAKE", "STOP START", "SPINBACK",
-                                                   "WOW", "FLUTTER", "SCRATCH 8", "GATE 8", "GATE 4", "GATE 3", "GATE DOT", "OFFBEAT", "TRANCE 16", "PUMP 8",
+                                                   "FLYBY", "OCTAVES", "SCRATCH 8", "GATE 8", "GATE 4", "GATE 3", "GATE DOT", "OFFBEAT", "TRANCE 16", "HEARTBEAT",
                                                    "TREMOLO", "BREATHE", "RISE", "DROP", "ECHO", "REV SWELL", "HALF GATE", "TAPE FADE", "STUTTER FADE", "BUILD UP" };
 
         // The order on the page, in themed banks of 20 (projects store this index).
         const char* const shownNames[numSlots] = {
             // A: tempo and tape
             "HALF TIME", "HALF FIRST", "SLOWMO", "QUARTER", "DRAG", "LAZY", "SHUFFLE", "TAPE STOP", "SLOW DOWN", "BRAKE",
-            "SPIN UP", "STOP START", "WOW", "WARBLE", "FLUTTER", "REWIND", "SPINBACK", "REVERSE", "REVERSE 8", "REV HALF",
+            "SPIN UP", "STOP START", "FLYBY", "ARP UP", "OCTAVES", "REWIND", "SPINBACK", "REVERSE", "REVERSE 8", "REV HALF",
             // B: repeats and stutters
             "STUTTER 3", "STUTTER 4", "STUTTER 8", "STUTTER 16", "STUTTER 32", "ROLL", "ROLL DOWN", "ROLL 3", "FILL 16", "BEAT REPEAT",
             "REPEAT 2", "ECHO BEAT", "DOTTED", "POLY 3", "BOUNCE", "SCRATCH", "SCRATCH 8", "GLITCH", "BUILD UP", "STUTTER FADE",
             // C: gates and volume
-            "GATE 16", "GATE 8", "GATE 4", "GATE 3", "GATE DOT", "GATE 332", "OFFBEAT", "TRANCE 16", "HALF GATE", "SIDECHAIN",
-            "PUMP 8", "TREMOLO", "BREATHE", "SWELL", "REV SWELL", "RISE", "DROP", "ECHO", "TAPE FADE", "PUMP 4" };
+            "GATE 16", "GATE 8", "GATE 4", "GATE 3", "GATE DOT", "GATE 332", "OFFBEAT", "TRANCE 16", "HALF GATE", "STAIRS",
+            "HEARTBEAT", "TREMOLO", "BREATHE", "SWELL", "REV SWELL", "RISE", "DROP", "ECHO", "TAPE FADE", "GATE RAMP" };
 
         int builtIndex (const char* name)
         {
@@ -160,15 +160,16 @@ namespace TimeFactory
             s[10].volume = {};
             for (int k = 0; k < 16; ++k) { const auto b = 0.25f * (float) k; at (s[10].volume, b, 4.0f); at (s[10].volume, b + 0.15f, 4.0f); at (s[10].volume, b + 0.15f, 0.0f); at (s[10].volume, b + 0.25f, 0.0f); }
 
-            // SIDECHAIN: ducked on every beat, swelling back.
+            // STAIRS: every beat climbs in four steps (a quarter, half, three quarters, full on its
+            // sixteenths): a staircase of level, the beat stepping up into the next.
             s[11].time = TimeCurve::flat (0.0f);
             s[11].volume = {};
             for (int k = 0; k < 4; ++k)
-            {
-                const auto b = (float) k;
-                at (s[11].volume, b, 0.0f); at (s[11].volume, b + 0.08f, 0.6f); at (s[11].volume, b + 0.25f, 2.4f);
-                at (s[11].volume, b + 0.5f, 3.7f); at (s[11].volume, b + 1.0f, 4.0f);
-            }
+                for (int step = 0; step < 4; ++step)
+                {
+                    const auto b = (float) k + 0.25f * (float) step, level = (float) (step + 1);
+                    at (s[11].volume, b, level); at (s[11].volume, b + 0.25f, level);
+                }
 
             // STUTTER 3: in triplets: every triplet eighth plays its first half twice.
             for (int k = 0; k < 12; ++k)
@@ -193,11 +194,18 @@ namespace TimeFactory
             // REWIND: three beats play, the last rewinds them at double speed.
             at (s[14].time, 0.0f, 0.0f); at (s[14].time, 3.0f, 0.0f); at (s[14].time, 4.0f, 3.0f);
 
-            // WARBLE: a worn tape: the speed wavers round normal once a beat (the pitch with it).
-            for (int k = 0; k <= 32; ++k)
+            // ARP UP: every beat a step higher (0, +3, +5, +7 semitones): the bar starts a little
+            // behind and catches up, faster each beat.
             {
-                const auto t = 0.125f * (float) k;
-                at (s[15].time, t, 0.03f * (1.0f - std::cos (2.0f * juce::MathConstants<float>::pi * t)));
+                constexpr float speeds[] = { 1.0f, 1.189f, 1.335f, 1.498f };
+                float lag = 0.0f;
+                for (const auto sp : speeds) lag += sp - 1.0f;
+                for (int k = 0; k < 4; ++k)
+                {
+                    at (s[15].time, (float) k, lag);
+                    lag -= speeds[k] - 1.0f;
+                }
+                at (s[15].time, 4.0f, 0.0f);
             }
 
             // GLITCH: sixteenths that repeat, stick and flip at odd places.
@@ -312,10 +320,23 @@ namespace TimeFactory
             at (s[39].time, 0.0f, 0.0f); at (s[39].time, 3.5f, 0.0f); at (s[39].time, 4.0f, 2.0f);
 
             // --- Bank C: tape, gates and combinations ------------------------------------
-            // WOW: a deep, slow wow (the pitch sways over two beats).
-            for (int k = 0; k <= 32; ++k) { const auto t = 0.125f * (float) k; at (s[40].time, t, 0.1f * (1.0f - std::cos (0.5f * twoPi * t))); }
-            // FLUTTER: a fast, small flutter (a worn capstan).
-            for (int k = 0; k <= 48; ++k) { const auto t = (float) k / 12.0f; at (s[41].time, t, 0.006f * (1.0f - std::cos (2.0f * twoPi * t))); }
+            // FLYBY: the sound passes by like a car (Doppler): higher and louder as it comes,
+            // lower and fading as it goes, once a bar.
+            s[40].volume = {};
+            for (int k = 0; k <= 16; ++k)
+            {
+                const auto t = 0.25f * (float) k, d = (t - 2.0f) / 2.0f;
+                at (s[40].time, t, 0.25f * d * d);
+                at (s[40].volume, t, 4.0f * (0.3f + 0.7f * (1.0f - d * d)));
+            }
+            // OCTAVES: every beat an eighth an octave down, a sixteenth an octave up, a sixteenth
+            // as it is (the octaves trade places with the tune).
+            for (int k = 0; k < 4; ++k)
+            {
+                const auto b = (float) k;
+                at (s[41].time, b, 0.0f); at (s[41].time, b + 0.5f, 0.25f); at (s[41].time, b + 0.75f, 0.0f);
+            }
+            at (s[41].time, 4.0f, 0.0f);
             // SCRATCH 8: a quick back-and-forth on every eighth.
             for (int k = 0; k < 8; ++k) { const auto e = 0.5f * (float) k; at (s[42].time, e, 0.0f); at (s[42].time, e + 0.125f, 0.25f); at (s[42].time, e + 0.25f, 0.0f); at (s[42].time, e + 0.5f, 0.0f); }
             // Gates and levels (time stays live).
@@ -333,9 +354,15 @@ namespace TimeFactory
                 for (int k = 0; k < 16; ++k) { const auto b = 0.25f * (float) k; at (s[48].volume, b + 0.02f, 4.0f * levels[k]); at (s[48].volume, b + 0.2f, 0.0f); }
                 at (s[48].volume, 4.0f, 0.0f);
             }
-            // PUMP 8: sidechain ducking on every eighth.
+            // HEARTBEAT: a double pulse on every beat (lub-dub), quiet in between.
             s[49].volume = {};
-            for (int k = 0; k < 8; ++k) { const auto e = 0.5f * (float) k; at (s[49].volume, e, 0.0f); at (s[49].volume, e + 0.05f, 0.6f); at (s[49].volume, e + 0.2f, 2.8f); at (s[49].volume, e + 0.5f, 4.0f); }
+            for (int k = 0; k < 4; ++k)
+            {
+                const auto b = (float) k;
+                at (s[49].volume, b, 0.4f); at (s[49].volume, b + 0.02f, 4.0f); at (s[49].volume, b + 0.14f, 0.8f);
+                at (s[49].volume, b + 0.25f, 0.5f); at (s[49].volume, b + 0.27f, 2.8f); at (s[49].volume, b + 0.42f, 0.5f);
+                at (s[49].volume, b + 1.0f, 0.4f);
+            }
             // TREMOLO: the level sways on every eighth.
             s[50].volume = {};
             for (int k = 0; k <= 48; ++k) { const auto t = (float) k / 12.0f; at (s[50].volume, t, 4.0f * (0.625f + 0.375f * std::cos (2.0f * twoPi * t))); }
@@ -377,16 +404,22 @@ namespace TimeFactory
             s[59].time = s[13].time;
             s[59].volume = {}; at (s[59].volume, 0.0f, 1.4f); at (s[59].volume, 4.0f, 4.0f);
 
-            // PUMP 4: sidechain ducking on every beat (deeper and slower than PUMP 8).
+            // GATE RAMP: a gate that speeds up through the bar (eighths, sixteenths, thirty-
+            // seconds), then opens on the last beat: a build into the next bar.
             {
-                auto& pump = s[(size_t) builtIndex ("PUMP 4")];
-                at (pump.time, 0.0f, 0.0f); at (pump.time, 4.0f, 0.0f);
-                pump.volume = {};
-                for (int k = 0; k < 4; ++k)
+                auto& ramp = s[(size_t) builtIndex ("GATE RAMP")];
+                ramp.time = TimeCurve::flat (0.0f);
+                ramp.volume = {};
+                for (int k = 0; k < 3; ++k)
                 {
-                    const auto b = (float) k;
-                    at (pump.volume, b, 0.0f); at (pump.volume, b + 0.08f, 0.4f); at (pump.volume, b + 0.4f, 2.6f); at (pump.volume, b + 1.0f, 4.0f);
+                    const auto step = 0.5f / (float) (1 << k);
+                    for (auto b = (float) k; b < (float) k + 0.999f; b += step)
+                    {
+                        at (ramp.volume, b, 4.0f); at (ramp.volume, b + step * 0.5f, 4.0f);
+                        at (ramp.volume, b + step * 0.5f, 0.0f); at (ramp.volume, b + step, 0.0f);
+                    }
                 }
+                at (ramp.volume, 3.0f, 4.0f); at (ramp.volume, 4.0f, 4.0f);
             }
 
             for (auto& slot : s) { slot.time.sort(); slot.volume.sort(); }

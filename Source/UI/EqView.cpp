@@ -1,11 +1,12 @@
 #include "EqView.h"
+#include "ScreenStyle.h"
 
 namespace kerf::ui
 {
 
 namespace
 {
-    constexpr float minHz = 20.0f, maxHz = 20000.0f;
+    constexpr float minHz = 20.0f, maxHz = 30000.0f; // the EQ reaches 30 kHz (the grid is labelled to 20 kHz)
 
     juce::String hzText (float hz)
     {
@@ -151,6 +152,7 @@ void EqView::select (int band)
 
 void EqView::animationTick (double dt)
 {
+    const ScreenScope screenColours; // (colours picked here are the screen's too)
     if (! isVisible())
         return;
 
@@ -190,6 +192,7 @@ void EqView::animationTick (double dt)
 void EqView::paint (juce::Graphics& g)
 {
     fillBackdrop (g, *this, getLocalBounds().toFloat(), Backdrop::deep);
+    const auto whiteChassis = lightTheme();
 
     // Header
     {
@@ -199,13 +202,28 @@ void EqView::paint (juce::Graphics& g)
                   h, TextStyle::micro, Colours::textFaint, juce::Justification::centredRight);
     }
 
+    // The graph: a dark display in every theme (in white mode framed like the other screens).
+    const ScreenScope screenColours;
+    if (whiteChassis)
+        screen::paintScreen (g, juce::Rectangle<float> (plot.getX() - 40.0f, plot.getY() - 10.0f, plot.getWidth() + 80.0f, plot.getHeight() + 32.0f), {}, 0.0f, this);
+
     // Grid
-    for (float hz : { 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f })
+    // The log scale as on a real analyser: faint lines at every step of each decade (30, 40, 60 ...
+    // 9k), labelled ones at 20, 50, 100, 200, 500, 1k, 2k, 5k, 10k, 20k (the EQ itself goes on to 30k).
+    for (float decade : { 10.0f, 100.0f, 1000.0f, 10000.0f })
+        for (int k = 1; k <= 9; ++k)
+        {
+            const auto hz = decade * (float) k;
+            if (hz <= minHz || hz >= maxHz || k == 1 || k == 2 || k == 5)
+                continue; // (the labelled ones are drawn below)
+            drawHairline (g, { freqToX (hz), plot.getY(), 1.0f, plot.getHeight() }, Colours::hairline.withAlpha (0.3f));
+        }
+    for (float hz : { 20.0f, 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f, 20000.0f })
     {
         const auto x = freqToX (hz);
-        drawHairline (g, { x, plot.getY(), 1.0f, plot.getHeight() }, Colours::hairline.withAlpha (0.7f));
-        drawText (g, hz >= 1000.0f ? juce::String ((int) (hz / 1000.0f)) + "k" : juce::String ((int) hz),
-                  { x + 3.0f, plot.getBottom() + 1.0f, 40.0f, 11.0f }, TextStyle::micro, Colours::textFaint);
+        drawHairline (g, { std::min (x, plot.getRight() - 1.0f), plot.getY(), 1.0f, plot.getHeight() }, Colours::hairline.withAlpha (0.7f));
+        const auto text = hz >= 1000.0f ? juce::String ((int) (hz / 1000.0f)) + "k" : juce::String ((int) hz);
+        drawText (g, text, { x + 3.0f, plot.getBottom() + 1.0f, 40.0f, 11.0f }, TextStyle::micro, Colours::textFaint);
     }
     for (float db : { -12.0f, -6.0f, 6.0f, 12.0f })
     {
@@ -239,9 +257,10 @@ void EqView::paint (juce::Graphics& g)
             line.quadraticTo (pts[(size_t) b], mid);
         }
         line.lineTo (pts[(size_t) n - 1]);
+        line.lineTo (plot.getRight(), pts[(size_t) n - 1].y); // (the analysis ends near 20 kHz: on, flat, to the EQ's 30k)
 
         auto area = line;
-        area.lineTo (pts[(size_t) n - 1].x, plot.getBottom());
+        area.lineTo (plot.getRight(), plot.getBottom());
         area.lineTo (pts[0].x, plot.getBottom());
         area.closeSubPath();
 
@@ -257,9 +276,12 @@ void EqView::paint (juce::Graphics& g)
     // Response curve: every point weighted by its presence (fade in / out), and the whole
     // curve rising out of the 0 dB line when the view opens.
     const auto rise = Motion::easeOut (intro);
+    // At the plugin's sample rate; above its Nyquist frequency (up to 30 kHz is shown) the curve holds.
+    const auto curveRate = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : 48000.0;
+    auto heardAt = [curveRate] (float f) { return std::min ((double) f, curveRate * 0.49); };
     std::array<EqProcessor::Biquad, EqProcessor::maxBands> filters;
     for (size_t b = 0; b < filters.size(); ++b)
-        filters[b] = EqProcessor::Biquad::forBand (shown.bands[b], 48000.0);
+        filters[b] = EqProcessor::Biquad::forBand (shown.bands[b], curveRate);
 
     juce::Path curve, fill;
     const auto steps = (int) plot.getWidth() / 2;
@@ -270,7 +292,7 @@ void EqView::paint (juce::Graphics& g)
         double db = 0.0;
         for (size_t b = 0; b < filters.size(); ++b)
             if (shown.bands[b].on)
-                db += presence[b] * heardAmount[b] * filters[b].magnitudeDb (f, 48000.0);
+                db += presence[b] * heardAmount[b] * filters[b].magnitudeDb (heardAt (f), curveRate);
         const auto y = dbToY ((float) db * rise);
         if (i == 0) { curve.startNewSubPath (x, y); fill.startNewSubPath (x, plot.getCentreY()); fill.lineTo (x, y); }
         else        { curve.lineTo (x, y); fill.lineTo (x, y); }
@@ -291,16 +313,16 @@ void EqView::paint (juce::Graphics& g)
         if (free)
         {
             const auto s = suggestionAt (hoverPoint);
-            const auto ghostFilter = EqProcessor::Biquad::forBand (s, 48000.0);
+            const auto ghostFilter = EqProcessor::Biquad::forBand (s, curveRate);
             juce::Path ghost;
             for (int i = 0; i <= steps; ++i)
             {
                 const auto x = plot.getX() + plot.getWidth() * (float) i / (float) steps;
                 const auto f = xToFreq (x);
-                double db = ghostFilter.magnitudeDb (f, 48000.0);
+                double db = ghostFilter.magnitudeDb (heardAt (f), curveRate);
                 for (size_t b = 0; b < filters.size(); ++b)
                     if (shown.bands[b].on)
-                        db += presence[b] * heardAmount[b] * filters[b].magnitudeDb (f, 48000.0);
+                        db += presence[b] * heardAmount[b] * filters[b].magnitudeDb (heardAt (f), curveRate);
                 const auto y = dbToY ((float) db);
                 if (i == 0) ghost.startNewSubPath (x, y); else ghost.lineTo (x, y);
             }
@@ -525,11 +547,13 @@ void EqTypeTools::TypeButton::paintButton (juce::Graphics& g, bool highlighted, 
     // Like the other tool symbols: a small raised box, lit in the accent colour when on.
     const auto b = getLocalBounds().toFloat().reduced (0.5f);
     const auto on = getToggleState();
-    g.setColour (on ? Colours::accent.withAlpha (down ? 0.3f : 0.18f) : (highlighted ? Colours::surfaceHover : Colours::surfaceRaised));
-    g.fillRoundedRectangle (b, Metrics::radiusSmall);
-    g.setColour (on ? Colours::accent : (highlighted ? Colours::textDim : Colours::hairline));
-    g.drawRoundedRectangle (b, Metrics::radiusSmall, on ? 1.2f : Metrics::hairline);
-    const auto colour = on ? Colours::accent : (highlighted ? Colours::text : Colours::textDim);
+    Face::State face;
+    face.on = on;
+    face.hover = highlighted;
+    face.down = down;
+    face.enabled = isEnabled();
+    Face::key (g, b, face);
+    const auto colour = Face::text (face);
     if (const auto icon = eqTypeIcon (type, colour))
         icon->drawWithin (g, b.reduced (5.0f, 5.0f), juce::RectanglePlacement::centred, isEnabled() ? 1.0f : 0.4f);
 }

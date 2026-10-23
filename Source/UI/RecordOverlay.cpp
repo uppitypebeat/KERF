@@ -14,16 +14,13 @@ void handleRecordButton (KerfAudioProcessor& processor, AudioRecorder::Source so
         return;
     }
 
-    const bool isInput = source == AudioRecorder::Source::input;
     juce::PopupMenu menu;
-    menu.addSectionHeader (isInput ? "RECORD DAW INPUT" : "CAPTURE KERF OUTPUT");
+    menu.addSectionHeader ("RECORD DAW INPUT");
     menu.addItem ("Until stopped", [&processor, source] { processor.startRecording (source, 0.0); });
     for (int bars : { 1, 2, 4, 8 })
         menu.addItem (juce::String (bars) + (bars == 1 ? " bar" : " bars"), [&processor, source, bars] { processor.startRecording (source, bars); });
     menu.addSeparator();
-    menu.addItem (isInput ? "Bar lengths start on the next bar while the DAW plays. Audio must be routed into KERF's input."
-                          : "Bar lengths start on the next bar while the DAW plays.",
-                  false, false, nullptr);
+    menu.addItem ("Bar lengths start on the next bar while the DAW plays. Audio must be routed into KERF's input.", false, false, nullptr);
 
     menu.setLookAndFeel (&anchor.getLookAndFeel()); // the plugin's menu style
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&anchor));
@@ -92,7 +89,6 @@ void RecordOverlay::paint (juce::Graphics& g)
     g.drawRect (panel, 1.0f);
 
     auto r = panel.reduced (20.0f, 16.0f);
-    const auto isInput = rec.getSource() == AudioRecorder::Source::input;
     const auto state = rec.getState();
 
     // Title row with a blinking record dot
@@ -102,7 +98,7 @@ void RecordOverlay::paint (juce::Graphics& g)
     g.fillEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ title.getX() + 4.0f, title.getCentreY() }));
     title.removeFromLeft (16.0f);
 
-    juce::String heading = isInput ? "REC  DAW INPUT" : "CAPTURE  KERF OUTPUT";
+    juce::String heading = "REC  DAW INPUT";
     drawText (g, heading, title, TextStyle::sectionLabel, Colours::text.withAlpha (alpha));
 
     juce::String stateText;
@@ -133,7 +129,7 @@ void RecordOverlay::paint (juce::Graphics& g)
     g.setColour ((rec.getLevel() > 0.99f ? Colours::record : Colours::text).withAlpha (0.8f * alpha));
     g.fillRect (meter.withWidth (meter.getWidth() * juce::jmap (db, -60.0f, 0.0f, 0.0f, 1.0f)));
 
-    if (isInput && state == AudioRecorder::State::recording && rec.getRecordedSeconds() > 1.0 && rec.getLevel() < 1.0e-4f)
+    if (state == AudioRecorder::State::recording && rec.getRecordedSeconds() > 1.0 && rec.getLevel() < 1.0e-4f)
         drawText (g, "No input signal", juce::Rectangle<float> (meter.getRight() + 10.0f, meter.getY() - 6.0f, 140.0f, 14.0f),
                   TextStyle::label, Colours::accent.withAlpha (alpha));
 }
@@ -145,13 +141,11 @@ namespace kerf::ui
 
 RecordTools::RecordTools (KerfAudioProcessor& p, AnimationClock& c) : processor (p), clock (c)
 {
-    for (auto* b : { &recButton, &captureButton, &resampleButton })
+    for (auto* b : { &recButton, &resampleButton })
         addAndMakeVisible (b);
 
     recButton.setTooltip ("Record audio coming into KERF from the DAW");
     recButton.onClick = [this] { handleRecordButton (processor, AudioRecorder::Source::input, recButton); };
-    captureButton.setTooltip ("Record what KERF plays");
-    captureButton.onClick = [this] { handleRecordButton (processor, AudioRecorder::Source::output, captureButton); };
     resampleButton.setTooltip ("Turn the pattern into a new sample");
     resampleButton.onClick = [this] { processor.resamplePatternAsync ({}); };
     clock.add (this);
@@ -164,9 +158,9 @@ RecordTools::~RecordTools()
 
 void RecordTools::resized()
 {
-    // [rec] [capture] [resample]
+    // [rec] [resample]
     auto r = getLocalBounds();
-    for (auto* b : { &recButton, &captureButton, &resampleButton })
+    for (auto* b : { &recButton, &resampleButton })
     {
         b->setBounds (r.removeFromLeft (26).withSizeKeepingCentre (26, 22));
         r.removeFromLeft (4);
@@ -178,11 +172,8 @@ void RecordTools::animationTick (double)
     const auto& rec = processor.getRecorder();
     const auto active = rec.isActive();
     const auto recOn = active && rec.getSource() == AudioRecorder::Source::input;
-    const auto capOn = active && rec.getSource() == AudioRecorder::Source::output;
     if (recButton.getToggleState() != recOn) recButton.setToggleState (recOn, juce::dontSendNotification);
-    if (captureButton.getToggleState() != capOn) captureButton.setToggleState (capOn, juce::dontSendNotification);
     recButton.setEnabled (! active || recOn);
-    captureButton.setEnabled (! active || capOn);
     resampleButton.setEnabled (! active && processor.getSampleInfo().sample != nullptr);
 }
 

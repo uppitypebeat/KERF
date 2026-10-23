@@ -46,7 +46,7 @@ TimeView::TimeView (KerfAudioProcessor& p, AnimationClock& c) : processor (p), c
 {
     speedHistory.fill (1.0f);
     addChildComponent (reset);
-    reset.setTooltip ("Back to the preset's original shape (your own curves: flat)");
+    reset.setTooltip ("Back to the shape as it came (your own curves: flat)");
     reset.onClick = [this] { processor.resetTimeSlot (shownSlot); };
     clock.add (this);
 }
@@ -77,8 +77,8 @@ void TimeView::resized()
 juce::String TimeView::slotTitle() const
 {
     if (shownSlot < 0)
-        return processor.isTimeSlotEdited (shownSlot) ? "YOUR OWN CURVES" : "NO PRESET  -  DRAW, OR PICK ONE BELOW";
-    return "PRESET " + juce::String (shownSlot + 1).paddedLeft ('0', 2) + "  " + TimeFactory::name (shownSlot)
+        return processor.isTimeSlotEdited (shownSlot) ? "YOUR OWN CURVES" : "NO SHAPE  -  DRAW, OR PICK ONE BELOW";
+    return "SHAPE " + juce::String (shownSlot + 1).paddedLeft ('0', 2) + "  " + TimeFactory::name (shownSlot)
            + (processor.isTimeSlotEdited (shownSlot) ? "  (EDITED)" : "");
 }
 
@@ -149,6 +149,7 @@ TimeView::Hit TimeView::hitTest (juce::Point<float> p) const
 //==============================================================================
 void TimeView::animationTick (double dt)
 {
+    const ScreenScope screenColours; // (colours picked here are the screen's too)
     time += dt;
     if (intro < 1.0f)
         intro = std::min (1.0f, intro + (float) dt / 0.8f);
@@ -226,6 +227,7 @@ void TimeView::paint (juce::Graphics& g)
         drawText (g, readout, h, TextStyle::micro, Colours::textFaint, juce::Justification::centredRight);
     }
 
+    const ScreenScope screenColours; // the screens: dark displays in every theme (the frame round them is not)
     paintCurveScreen (g, timeLane);
     paintCurveScreen (g, volumeLane);
     paintTape (g, tapeScreen);
@@ -552,7 +554,7 @@ void TimeView::store (const TimeSlot& slot)
 void TimeView::showMenu (int lane)
 {
     juce::PopupMenu menu;
-    menu.addSectionHeader (juce::String (lane == timeLane ? "TIME" : "VOLUME") + (shownSlot < 0 ? juce::String ("  -  YOUR OWN CURVES") : "  -  PRESET " + juce::String (shownSlot + 1)));
+    menu.addSectionHeader (juce::String (lane == timeLane ? "TIME" : "VOLUME") + (shownSlot < 0 ? juce::String ("  -  YOUR OWN CURVES") : "  -  SHAPE " + juce::String (shownSlot + 1)));
     menu.addItem (lane == timeLane ? "Flat (no time effect)" : "Flat (full volume)", [this, lane]
     {
         auto slot = processor.getTimeSlot (shownSlot);
@@ -656,15 +658,19 @@ void TimeSlots::paint (juce::Graphics& g)
         const auto b = cardBounds (k).reduced (0.5f);
         const auto on = glow[(size_t) k];
 
-        g.setColour ((k == hovered ? Colours::surfaceHover : Colours::surfaceRaised));
-        g.fillRoundedRectangle (b, Metrics::radiusSmall);
-        if (on > 0.001f)
+        // The shared key face; the selected preset lights up (fading in and out).
         {
-            g.setColour (Colours::accent.withAlpha (0.10f + 0.10f * on));
-            g.fillRoundedRectangle (b, Metrics::radiusSmall);
+            Face::State face;
+            face.hover = k == hovered;
+            Face::key (g, b, face);
+            if (on > 0.001f)
+            {
+                face.on = true;
+                g.beginTransparencyLayer (juce::jmin (1.0f, on));
+                Face::key (g, b, face);
+                g.endTransparencyLayer();
+            }
         }
-        g.setColour (on > 0.5f ? Colours::accent : Colours::hairline);
-        g.drawRoundedRectangle (b, Metrics::radiusSmall, on > 0.5f ? 1.4f : Metrics::hairline);
 
         auto inner = b.reduced (6.0f, 4.0f);
         auto top = inner.removeFromTop (12.0f);
@@ -729,7 +735,7 @@ void TimeSlots::mouseDown (const juce::MouseEvent& e)
     if (e.mods.isPopupMenu())
     {
         juce::PopupMenu menu;
-        menu.addSectionHeader ("PRESET " + juce::String (k + 1) + "  " + TimeFactory::name (k));
+        menu.addSectionHeader ("SHAPE " + juce::String (k + 1) + "  " + TimeFactory::name (k));
         menu.addItem ("Back to the factory shape", processor.isTimeSlotEdited (k), false, [this, k] { processor.resetTimeSlot (k); });
         menu.setLookAndFeel (&getLookAndFeel());
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());

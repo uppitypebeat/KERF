@@ -123,7 +123,7 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
     spaceSend.setRange (0.0, 1.0, 0.0);
     spaceSend.textFromValueFunction = percentText;
     bindChop (addKnob (spaceSend, 1.0), IDs::spaceSend);
-    spaceSend.setTooltip ("How much of this chop goes into SPACE");
+    spaceSend.setTooltip ("How much of this chop goes into ECHO");
 
     // --- GRAIN -------------------------------------------------------------------
     attachParam (addKnob (grainMix, 0.0), Params::grainMix);
@@ -145,12 +145,18 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
     grainSend.setRange (0.0, 1.0, 0.0);
     grainSend.textFromValueFunction = percentText;
     bindChop (addKnob (grainSend, 1.0), IDs::grainSend);
-    grainSend.setTooltip ("How much grain texture this chop gets");
+    grainSend.setTooltip ("How much of the grains this chop gets");
 
     attachParam (addKnob (grainDrift, 0.0), Params::grainDrift);
     grainDrift.setTooltip ("Lets the read point wander by itself");
     attachParam (addKnob (grainShimmer, 0.0), Params::grainShimmer);
     grainShimmer.setTooltip ("Adds grains an octave or two higher");
+    attachParam (addKnob (grainDetune, 0.0), Params::grainDetune);
+    grainDetune.setTooltip ("Detunes each grain a little: a wide, shimmering unison");
+    attachParam (addKnob (grainGlide, 0.0), Params::grainGlide);
+    grainGlide.setTooltip ("Each grain bends up (right) or down (left) while it plays");
+    attachParam (addKnob (grainHaze, 0.0), Params::grainHaze);
+    grainHaze.setTooltip ("A long, soft reverb on the grains only");
     attachParam (addKnob (grainPitchShift, 0.0), Params::grainPitch);
     grainPitchShift.setTooltip ("Pitch of all grains in semitones");
     grainPitch.setTooltip ("Random pitch for each grain");
@@ -215,7 +221,7 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
     attachChoice (timeLength, Params::timeLength);
     timeLength.setTooltip ("Length of one TIME cycle");
     addAndMakeVisible (timeBank);
-    timeBank.setTooltip ("Preset banks A, B and C");
+    timeBank.setTooltip ("Shape banks A, B and C");
     timeBank.onChange = [this] (int b) { timeSlots.setBank (b); };
     timeSlots.onBankChanged = [this] (int b) { timeBank.setSelected (b, juce::dontSendNotification); };
 
@@ -307,7 +313,7 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
           } },
 
         // FX page: big knobs, vertically centred in the panel; mode options beside the knob.
-        { "SPACE", [] { return juce::String(); }, 1, { &space, &spaceSend }, 0, heroW + 4.0f + (float) Knob::preferredWidth (Knob::Size::small),
+        { "ECHO", [] { return juce::String(); }, 1, { &space, &spaceSend }, 0, heroW + 4.0f + (float) Knob::preferredWidth (Knob::Size::small),
           [this] (juce::Rectangle<float> c, int)
           {
               space.setBounds ((int) c.getX(), fxY, (int) heroW, heroH);
@@ -318,7 +324,7 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
           [this, compact] (juce::Rectangle<float> c, int) { compact (c, dirt, dirtMode); } },
         { "WOBBLE", [] { return juce::String(); }, 1, { &wobble, &wobbleMode }, 0, compactWidth,
           [this, compact] (juce::Rectangle<float> c, int) { compact (c, wobble, wobbleMode); } },
-        { "TONE", [] { return juce::String(); }, 1, { &filter, &resonance }, 0, 2.0f * heroW + 10.0f,
+        { "FILTER", [] { return juce::String(); }, 1, { &filter, &resonance }, 0, 2.0f * heroW + 10.0f,
           [this] (juce::Rectangle<float> c, int)
           {
               filter.setBounds ((int) c.getX(), fxY, (int) heroW, heroH);
@@ -342,18 +348,18 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
               largeRow (c, pitch, { &grainScan, &grainPosition, &grainSpray, &grainDrift }, centredY);
               inHeader (c, grainFreeze, grainFreeze.getIdealWidth());
           } },
-        { "PITCH", [] { return juce::String(); }, 2, { &grainPitchShift, &grainPitch, &grainShimmer, &grainScale }, 3, 0.0f,
+        { "PITCH", [] { return juce::String(); }, 2, { &grainPitchShift, &grainPitch, &grainDetune, &grainGlide, &grainShimmer, &grainScale }, 5, 0.0f,
           [this, largeRow, inHeader] (juce::Rectangle<float> c, int pitch)
           {
-              largeRow (c, pitch, { &grainPitchShift, &grainPitch, &grainShimmer }, centredY);
+              largeRow (c, pitch, { &grainPitchShift, &grainPitch, &grainDetune, &grainGlide, &grainShimmer }, centredY);
               inHeader (c, grainScale, juce::jmin (152, juce::roundToInt (c.getWidth()) - 50));
           } },
-        { "COLOUR", [this] { return chopTag(); }, 2, { &grainSpread, &grainReverse, &grainSend }, 3, 0.0f,
-          [this, largeRow] (juce::Rectangle<float> c, int pitch) { largeRow (c, pitch, { &grainSpread, &grainReverse, &grainSend }, centredY); } },
+        { "COLOUR", [this] { return chopTag(); }, 2, { &grainSpread, &grainReverse, &grainHaze, &grainSend }, 4, 0.0f,
+          [this, largeRow] (juce::Rectangle<float> c, int pitch) { largeRow (c, pitch, { &grainSpread, &grainReverse, &grainHaze, &grainSend }, centredY); } },
 
         // TIME page: the slots as cards over all the width there is; MIX with the cycle
         // stacked beside it at the right (compact, like the FX knobs).
-        { "PRESETS", [this] { const auto a = (int) processor.getParameters().getRawParameterValue (Params::timeSlot)->load();
+        { "SHAPES", [this] { const auto a = (int) processor.getParameters().getRawParameterValue (Params::timeSlot)->load();
                             return a > 0 ? juce::String (TimeFactory::name (a - 1)) + "  -  CLICK AGAIN: DESELECT" : (processor.isTimeSlotEdited (KerfAudioProcessor::ownTimeCurves) ? juce::String ("NONE  -  YOUR OWN CURVES PLAY") : juce::String ("NONE  -  CLICK ONE, OR DRAW ABOVE")); },
           4, { &timeSlots, &timeBank }, 0, 0.0f,
           [this] (juce::Rectangle<float> c, int)
@@ -759,23 +765,15 @@ void PageTabs::paint (juce::Graphics& g)
         const auto b = tabBounds (pg).reduced (0.5f);
         const auto on = pg == panel.getPage();
 
-        if (on || pg == hovered) // idle tabs let the background show
-        {
-            g.setColour (on ? Colours::surfaceHover : Colours::surfaceRaised);
-            g.fillRoundedRectangle (b, Metrics::radiusSmall);
-        }
-        g.setColour (on ? Colours::line : Colours::hairline);
-        g.drawRoundedRectangle (b, Metrics::radiusSmall, Metrics::hairline);
-
-        if (on)
-        {
-            g.setColour (Colours::accent);
-            g.fillRect (b.reduced (b.getWidth() * 0.28f, 0.0f).withHeight (1.5f).withBottomY (b.getBottom() - 2.0f));
-        }
+        // The shared key face: the page in front lit.
+        const auto isOff = off[(size_t) pg];
+        Face::State face;
+        face.on = on;
+        face.hover = pg == hovered;
+        Face::key (g, b, face);
 
         // A page switched off (double-click): its name faint and struck through, a hollow dot.
-        const auto isOff = off[(size_t) pg];
-        drawText (g, pageName (pg), b, TextStyle::label, isOff ? Colours::textFaint : (on ? Colours::text : Colours::textDim), juce::Justification::centred);
+        drawText (g, pageName (pg), b, TextStyle::label, isOff ? Colours::textFaint : Face::text (face), juce::Justification::centred);
         if (isOff)
         {
             const auto w = textWidth (pageName (pg), TextStyle::label) + 6.0f;

@@ -34,6 +34,8 @@ struct VoiceBusses
     float* spaceR = nullptr;
     float* scratchL = nullptr; // per-voice work space (at least numSamples long)
     float* scratchR = nullptr;
+    float* hazeL = nullptr;    // the grains alone (after gain and pan), into HAZE
+    float* hazeR = nullptr;
 };
 
 /** Plays one chop. Real-time safe: no allocation, no locks. */
@@ -113,11 +115,11 @@ public:
         return stage == Stage::idle ? 0.0f : std::max (0.0f, smoothGrain.getCurrentValue());
     }
 
-    /** UI: calls fn (positionInOriginalSample, level 0..1, semitones) for every sounding grain. */
+    /** UI: calls fn (positionInOriginalSample, level 0..1, semitones, detune cents) for every sounding grain. */
     template <typename Fn>
     void forEachGrainDisplay (Fn&& fn) const
     {
-        cloud.forEachGrain ([this, &fn] (double pos, float level, float semis) { fn (toDisplay (pos), level, semis); });
+        cloud.forEachGrain ([this, &fn] (double pos, float level, float semis, float cents) { fn (toDisplay (pos), level, semis, cents); });
     }
 
     double getSprayCentreDisplay() const noexcept { return toDisplay (cloud.getSprayCentre()); }

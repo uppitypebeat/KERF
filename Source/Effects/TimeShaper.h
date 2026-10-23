@@ -39,7 +39,7 @@ namespace TimeFactory
     constexpr int slotsPerBank = 20;
     /** The factory shapes in page order: bank A tempo and tape (HALF TIME ... REV HALF), bank B
         repeats and stutters (STUTTER 3 ... STUTTER FADE), bank C gates and volume (GATE 16 ...
-        PUMP 4). Every slot can be drawn over (it keeps your curves until reset). */
+        GATE RAMP). Every slot can be drawn over (it keeps your curves until reset). */
     const std::array<TimeSlot, numSlots>& slots();
     const char* name (int slot);
 }

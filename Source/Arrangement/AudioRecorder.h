@@ -8,8 +8,8 @@
 namespace kerf
 {
 
-/** Records audio into a pre-allocated buffer: either KERF's input bus (audio routed
-    from the DAW) or KERF's own output (CAPTURE / resampling).
+/** Records audio into a pre-allocated buffer: KERF's input bus (audio routed from the
+    DAW).
 
     Thread protocol:
       - The message thread allocates the buffer and arms (only from `idle`).

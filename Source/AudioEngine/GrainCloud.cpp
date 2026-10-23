@@ -53,6 +53,17 @@ float GrainCloud::nextRandom() noexcept
     return (float) (rng & 0xffffff) / (float) 0x1000000;
 }
 
+float GrainCloud::softLimit (float x) noexcept
+{
+    // Clean below 0.7, then bending smoothly towards 1 (never past it).
+    constexpr float knee = 0.7f;
+    const auto a = std::abs (x);
+    if (a <= knee)
+        return x;
+    const auto bent = knee + (1.0f - knee) * std::tanh ((a - knee) / (1.0f - knee));
+    return x < 0.0f ? -bent : bent;
+}
+
 float GrainCloud::envelope (int age, int length, float shape) noexcept
 {
     // SHAPE 0 .. 0.5: a Tukey window from nearly rectangular (hard, gritty) to Hann (soft);
@@ -123,8 +134,13 @@ void GrainCloud::spawn (const SampleData& sample, const ChopParams& chop, const 
     if (s.shimmer > 0.0005f && nextRandom() < 0.7f * s.shimmer)
         offset += nextRandom() < 0.3f ? 24.0f : 12.0f;
 
+    // DETUNE: a few cents either way per grain (a wide, beating unison); GLIDE: how far the
+    // grain bends while it plays (a little different for each, so they do not move in lockstep).
+    const auto cents = bipolarRandom() * juce::jlimit (0.0f, 1.0f, s.detune) * GrainLimits::detuneCents;
+    const auto glideSemis = juce::jlimit (-1.0f, 1.0f, s.glide) * GrainLimits::glideSemitones * (0.75f + 0.25f * nextRandom());
+
     const auto semis = s.pitch + offset;
-    const auto pitch = semitonesToRatio ((double) semis);
+    const auto pitch = semitonesToRatio ((double) semis + (double) cents * 0.01);
     const bool backwards = nextRandom() < s.reverse;
     const auto direction = (chop.reverse != backwards) ? -1.0 : 1.0;
 
@@ -138,14 +154,25 @@ void GrainCloud::spawn (const SampleData& sample, const ChopParams& chop, const 
     slot->envStep = (float) envTableSize / (float) std::max (1, slot->length - 1);
     slot->envPhase = std::min ((float) envTableSize, slot->envStep * (float) slot->age);
     slot->semitones = semis;
+    slot->cents = cents;
+    slot->glideSemitones = glideSemis;
+    slot->stepMul = std::pow (2.0, (double) glideSemis / 12.0 / (double) slot->length);
+    if (slot->age > 0)
+        slot->step *= std::pow (slot->stepMul, (double) slot->age);
+
+    // Pitched up (at its fastest), the grain reads from the octave copy nearest its speed.
+    const auto fastest = std::abs (slot->step) * std::max (1.0, std::pow (2.0, (double) glideSemis / 12.0));
+    const auto level = juce::jlimit (0, SampleData::numOctaves, (int) std::lround (std::log2 (std::max (1.0, fastest))));
+    slot->srcL = sample.readPointer (level, 0);
+    slot->srcR = sample.readPointer (level, 1);
+    slot->levelLength = sample.numSamplesAt (level);
+    slot->scale = 1.0 / (double) (1 << level);
 
     // Constant-power random pan within the spread.
     const auto pan = bipolarRandom() * juce::jlimit (0.0f, 1.0f, s.spread);
     const auto angle = (pan + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
     slot->gainL = std::cos (angle) * juce::MathConstants<float>::sqrt2;
     slot->gainR = std::sin (angle) * juce::MathConstants<float>::sqrt2;
-
-    juce::ignoreUnused (sample);
 }
 
 void GrainCloud::render (const SampleData& sample, const ChopParams& chop, const GrainSettings& s,
@@ -158,8 +185,7 @@ void GrainCloud::render (const SampleData& sample, const ChopParams& chop, const
     if (total < 4)
         return;
 
-    const auto* srcL = sample.audio.getReadPointer (0);
-    const auto* srcR = sample.audio.getReadPointer (sample.getNumChannels() > 1 ? 1 : 0);
+    const auto mono = sample.getNumChannels() < 2;
 
     // Free: DENSITY grains per second. SYNC: one grain per note value at the tempo, exactly on
     // time (no jitter), so the cloud becomes a rhythm.
@@ -208,7 +234,7 @@ void GrainCloud::render (const SampleData& sample, const ChopParams& chop, const
     const auto norm = (float) (1.0 / std::sqrt (overlap));
 
     // 4-point Hermite interpolation: clean when grains are pitched (linear dulls and grits).
-    auto read = [total] (const float* d, double p) noexcept
+    auto read = [] (const float* d, double p, int64_t total) noexcept
     {
         const auto i = (int64_t) std::floor (p);
         const auto f = (float) (p - (double) i);
@@ -236,7 +262,6 @@ void GrainCloud::render (const SampleData& sample, const ChopParams& chop, const
             envTable[(size_t) k] = envelope (k, envTableSize + 1, s.shape);
         envTable[(size_t) envTableSize + 1] = envTable[(size_t) envTableSize];
     }
-    const auto mono = srcL == srcR;
 
     // When grains start. With the read head moving (SCAN), grain k starts where the head passes
     // its place in the sample: k steps of the grid (the DENSITY or SYNC interval, measured in
@@ -312,11 +337,13 @@ void GrainCloud::render (const SampleData& sample, const ChopParams& chop, const
             // The envelope from the block's table (no cos / exp per grain and sample).
             const auto idx = (int) g.envPhase;
             const auto env = envTable[(size_t) idx] + (g.envPhase - (float) idx) * (envTable[(size_t) idx + 1] - envTable[(size_t) idx]);
-            const auto left = read (srcL, g.position);
+            const auto at = g.position * g.scale;
+            const auto left = read (g.srcL, at, g.levelLength);
             l += left * env * g.gainL;
-            r += (mono ? left : read (srcR, g.position)) * env * g.gainR;
+            r += (mono ? left : read (g.srcR, at, g.levelLength)) * env * g.gainR;
 
             g.position += g.step;
+            g.step *= g.stepMul; // GLIDE
             // Wrap inside the chop so long grains on short chops never leave the region.
             if (g.position < regionStart || g.position >= regionStart + regionLen)
                 g.position = regionStart + std::fmod (std::fmod (g.position - regionStart, regionLen) + regionLen, regionLen);
@@ -336,8 +363,9 @@ void GrainCloud::render (const SampleData& sample, const ChopParams& chop, const
             ++i;
         }
 
-        outL[n] = l * norm;
-        outR[n] = r * norm;
+        // A soft ceiling: a very dense cloud rounds off instead of clipping hard.
+        outL[n] = softLimit (l * norm);
+        outR[n] = softLimit (r * norm);
 
         readHead += headStep;
         if (readHead < regionStart || readHead >= regionStart + regionLen)

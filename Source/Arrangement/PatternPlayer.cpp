@@ -50,7 +50,8 @@ int PatternPlayer::hitsFor (const PatternEvent& e, int64_t step, const Groove& g
     for (int k = 0; k < repeats; ++k)
     {
         hits[(size_t) k].on = start + k * each;
-        hits[(size_t) k].off = start + (k + 1) * each - std::min (0.02, each * 0.25); // released just before the next hit
+        hits[(size_t) k].end = start + (k + 1) * each;
+        hits[(size_t) k].off = hits[(size_t) k].end - std::min (0.02, each * 0.25); // released just before the next hit
         hits[(size_t) k].velocity = velocity;
     }
     return repeats;

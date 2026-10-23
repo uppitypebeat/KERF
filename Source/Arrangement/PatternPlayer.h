@@ -44,7 +44,9 @@ public:
 
     /** The notes one event plays when its step is reached: its repeats spread evenly over
         its length. Times in steps; returns the number of hits (0 if the chance said no). */
-    struct Hit { double on = 0.0, off = 0.0; float velocity = 0.0f; };
+    /** `off`: released a moment before the next hit (so a voice can retrigger); `end`: the
+        hit's full length to the next one (a note written to a MIDI file). */
+    struct Hit { double on = 0.0, off = 0.0, end = 0.0; float velocity = 0.0f; };
     static int hitsFor (const PatternEvent& e, int64_t step, const Groove& groove, std::array<Hit, PatternEvent::maxRepeats>& hits) noexcept;
 
     /** The pattern sends a step's pitch as a pitch-wheel message on its channel right before

@@ -22,10 +22,15 @@ DragChip::DragChip (const juce::String& l) : label (l)
 void DragChip::paint (juce::Graphics& g)
 {
     const auto r = getLocalBounds().toFloat().reduced (0.5f);
-    g.setColour (hover || dragging ? Colours::surfaceHover : Colours::surfaceRaised);
-    g.fillRoundedRectangle (r, Metrics::radiusSmall);
-    g.setColour (ready.existsAsFile() && ! preparing ? Colours::accent.withAlpha (0.7f) : Colours::line);
-    g.drawRoundedRectangle (r, Metrics::radiusSmall, Metrics::hairline);
+    Face::State face;
+    face.hover = hover || dragging;
+    face.down = dragging;
+    Face::key (g, r, face);
+    if (ready.existsAsFile() && ! preparing)
+    {
+        g.setColour (Colours::accent.withAlpha (0.7f)); // ready to drag: the rim in the accent
+        g.drawRoundedRectangle (r, Face::radius, Metrics::hairline);
+    }
 
     // Grip: two columns of three dots ("you can drag this").
     g.setColour (Colours::textDim);
@@ -272,8 +277,11 @@ void PatternView::resized()
     const auto numBars = processor.getPattern().getBars();
     if (numBars > 1)
     {
-        auto left = r.removeFromLeft (std::min (160, 22 * numBars));
-        pages.setBounds (left.withSizeKeepingCentre (left.getWidth(), 20));
+        // Up to 4 bars in one row; 8 in two rows of 4 (5-8 under 1-4).
+        const auto twoRows = numBars > 4;
+        pages.setColumns (twoRows ? 4 : 0);
+        auto left = r.removeFromLeft (22 * std::min (4, numBars));
+        pages.setBounds (left.withSizeKeepingCentre (left.getWidth(), twoRows ? std::min (left.getHeight(), 40) : 20));
         r.removeFromLeft (10);
     }
 

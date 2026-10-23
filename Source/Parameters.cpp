@@ -1,5 +1,6 @@
 #include "Parameters.h"
 #include "Effects/TimeShaper.h"
+#include "AudioEngine/GrainCloud.h"
 
 namespace kerf::Params
 {
@@ -65,23 +66,33 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 
     // SPACE ------------------------------------------------------------------------
     // One macro knob: tempo-locked ping-pong echoes; amount sets level, length, width and tone.
-    layout.add (std::make_unique<F> (pid (space), "Space", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent()));
+    layout.add (std::make_unique<F> (pid (space), "Echo", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent()));
 
     // GRAIN ------------------------------------------------------------------------
-    layout.add (std::make_unique<F> (pid (grainMix), "Grain Texture", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent()));
+    layout.add (std::make_unique<F> (pid (grainMix), "Grains", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent()));
     layout.add (std::make_unique<F> (pid (grainSize), "Grain Size", skewedRange (5.0f, 500.0f, 80.0f), 80.0f, milliseconds()));
     layout.add (std::make_unique<F> (pid (grainDensity), "Grain Density", skewedRange (1.0f, 120.0f, 20.0f), 20.0f,
                                      FloatAttr().withStringFromValueFunction ([] (float v, int) { return juce::String (v, v < 10.0f ? 1 : 0) + " /s"; })));
     layout.add (std::make_unique<F> (pid (grainSpray), "Grain Spray", juce::NormalisableRange<float> (0.0f, 1.0f), 0.1f, percent()));
     layout.add (std::make_unique<F> (pid (grainPitchRnd), "Grain Pitch Random", juce::NormalisableRange<float> (0.0f, 12.0f, 1.0f), 0.0f, semitones()));
     layout.add (std::make_unique<F> (pid (grainSpread), "Grain Spread", juce::NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent()));
-    layout.add (std::make_unique<F> (pid (grainScan), "Grain Scan", juce::NormalisableRange<float> (0.0f, 2.0f), 1.0f,
+    layout.add (std::make_unique<F> (pid (grainScan), "Grain Speed", juce::NormalisableRange<float> (0.0f, 2.0f), 1.0f,
                                      FloatAttr().withStringFromValueFunction ([] (float v, int) { return juce::String (v, 2) + "x"; })));
     layout.add (std::make_unique<F> (pid (grainReverse), "Grain Reverse", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent()));
     layout.add (std::make_unique<F> (pid (grainPosition), "Grain Position", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent()));
     layout.add (std::make_unique<F> (pid (grainPitch), "Grain Pitch", juce::NormalisableRange<float> (-24.0f, 24.0f, 1.0f), 0.0f, semitones()));
     layout.add (std::make_unique<F> (pid (grainDrift), "Grain Drift", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent()));
     layout.add (std::make_unique<F> (pid (grainShimmer), "Grain Shimmer", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent()));
+    layout.add (std::make_unique<F> (pid (grainGlide), "Grain Glide", juce::NormalisableRange<float> (-1.0f, 1.0f), 0.0f,
+                                     FloatAttr().withStringFromValueFunction ([] (float v, int)
+                                     {
+                                         const auto st = v * GrainLimits::glideSemitones;
+                                         return std::abs (st) < 0.05f ? juce::String ("0 st") : (st > 0.0f ? "+" : "") + juce::String (st, 1) + " st";
+                                     })));
+    layout.add (std::make_unique<F> (pid (grainDetune), "Grain Detune", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f,
+                                     FloatAttr().withStringFromValueFunction ([] (float v, int)
+                                     { return juce::String (juce::roundToInt (v * GrainLimits::detuneCents)) + " ct"; })));
+    layout.add (std::make_unique<F> (pid (grainHaze), "Grain Haze", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent()));
     layout.add (std::make_unique<F> (pid (grainShape), "Grain Shape", juce::NormalisableRange<float> (0.0f, 1.0f), 0.25f,
                                      FloatAttr().withStringFromValueFunction ([] (float v, int)
                                      {
@@ -139,7 +150,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
         group->addChild (std::make_unique<B> (id (EqField::bypass), label + " Bypass", false));
         group->addChild (std::make_unique<C> (id (EqField::type), label + " Type",
                                               juce::StringArray { "Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch" }, 0));
-        group->addChild (std::make_unique<F> (id (EqField::freq), label + " Freq", skewedRange (20.0f, 20000.0f, 630.0f), 1000.0f, hz()));
+        group->addChild (std::make_unique<F> (id (EqField::freq), label + " Freq", skewedRange (20.0f, 30000.0f, 630.0f), 1000.0f, hz()));
         group->addChild (std::make_unique<F> (id (EqField::gain), label + " Gain", juce::NormalisableRange<float> (-18.0f, 18.0f, 0.1f), 0.0f, eqDb()));
         group->addChild (std::make_unique<F> (id (EqField::q), label + " Q", skewedRange (0.2f, 10.0f, 1.0f), 0.9f,
                                               FloatAttr().withStringFromValueFunction ([] (float v, int) { return "Q " + juce::String (v, 2); })));
@@ -200,8 +211,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
         group->addChild (std::make_unique<C> (id (PadField::mode), label + " Mode", juce::StringArray { "One-shot", "Gate", "Loop" }, 1));
         group->addChild (std::make_unique<F> (id (PadField::fadeIn), label + " Fade In", skewedRange (0.0f, 1000.0f, 60.0f), 1.0f, msText()));
         group->addChild (std::make_unique<F> (id (PadField::fadeOut), label + " Fade Out", skewedRange (0.0f, 2000.0f, 120.0f), 8.0f, msText()));
-        group->addChild (std::make_unique<F> (id (PadField::spaceSend), label + " Space Send", juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percent()));
-        group->addChild (std::make_unique<F> (id (PadField::grainSend), label + " Grain Send", juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percent()));
+        group->addChild (std::make_unique<F> (id (PadField::spaceSend), label + " Echo Send", juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percent()));
+        group->addChild (std::make_unique<F> (id (PadField::grainSend), label + " Grain Amount", juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percent()));
         group->addChild (std::make_unique<F> (id (PadField::decay), label + " Decay", skewedRange (1.0f, 5000.0f, 300.0f), 300.0f, msText()));
         group->addChild (std::make_unique<F> (id (PadField::sustain), label + " Sustain", juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percent()));
         layout.add (std::move (group));

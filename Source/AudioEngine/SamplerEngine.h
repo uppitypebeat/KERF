@@ -112,6 +112,7 @@ public:
         std::array<std::atomic<double>, maxGrains> grainPosition {};
         std::array<std::atomic<float>, maxGrains> grainLevel {};
         std::array<std::atomic<float>, maxGrains> grainPitch {}; // semitones
+        std::array<std::atomic<float>, maxGrains> grainCents {}; // DETUNE
         std::atomic<double> sprayCentre { 0.0 }, sprayHalfWidth { 0.0 };
     };
 

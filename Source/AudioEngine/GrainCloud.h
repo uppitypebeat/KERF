@@ -10,6 +10,13 @@
 namespace kerf
 {
 
+/** The ranges of GLIDE and DETUNE at full turn. */
+namespace GrainLimits
+{
+    inline constexpr float glideSemitones = 12.0f; // a grain bends up to an octave over its life
+    inline constexpr float detuneCents = 50.0f;    // +/- per grain
+}
+
 /** Global GRAIN settings for one block. */
 struct GrainSettings
 {
@@ -31,6 +38,8 @@ struct GrainSettings
     float drift = 0.0f;        // 0..1: the read position wanders by itself (slow random walk)
     float shimmer = 0.0f;      // 0..1: chance that a grain jumps one or two octaves up
     float syncBeats = 0.0f;    // SYNC: beats between grains (0 = free, DENSITY in grains per second)
+    float glide = 0.0f;        // -1..1: each grain bends down / up while it plays (to GrainLimits::glideSemitones)
+    float detune = 0.0f;       // 0..1: a fine random detune per grain (to GrainLimits::detuneCents)
     double bpm = 120.0;        // the tempo SYNC follows
 
     bool active() const noexcept { return mix > 0.0005f; }
@@ -64,14 +73,16 @@ public:
     void render (const SampleData& sample, const ChopParams& chop, const GrainSettings& s,
                  double basePlaybackRate, float* outL, float* outR, int numSamples);
 
-    /** For the UI: calls fn (position, level 0..1, semitones) for every sounding grain. */
+    /** For the UI: calls fn (position, level 0..1, semitones now (with its GLIDE so far),
+        detune in cents) for every sounding grain. */
     template <typename Fn>
     void forEachGrain (Fn&& fn) const
     {
         for (int i = 0; i < numActive; ++i)
         {
             const auto& g = grains[(size_t) i];
-            fn (g.position, envelope (g.age, g.length, g.shape), g.semitones);
+            const auto progress = (float) g.age / (float) std::max (1, g.length);
+            fn (g.position, envelope (g.age, g.length, g.shape), g.semitones + g.glideSemitones * progress, g.cents);
         }
     }
 
@@ -90,6 +101,15 @@ private:
         float shape = 0.25f;    // envelope shape (see GrainSettings::shape)
         float envPhase = 0.0f, envStep = 0.0f; // position in the envelope table
         float semitones = 0.0f; // pitch offset (for the display)
+        float cents = 0.0f;     // its DETUNE (for the display)
+        float glideSemitones = 0.0f; // how far GLIDE bends it over its life
+        double stepMul = 1.0;   // GLIDE: the step's change per output sample
+        // Where it reads: the sample, or (pitched up) a band-limited octave of it, so it does
+        // not alias. `scale` maps source frames to that level's frames.
+        const float* srcL = nullptr;
+        const float* srcR = nullptr;
+        int64_t levelLength = 0;
+        double scale = 1.0;
     };
 
     float nextRandom() noexcept; // 0..1
@@ -98,6 +118,7 @@ private:
     static uint32_t hash32 (uint64_t k) noexcept;
     double triggerAt (int64_t k, double jitter) const noexcept; // grain k's place in the sample
     static float envelope (int age, int length, float shape) noexcept;
+    static float softLimit (float x) noexcept;
 
     std::array<Grain, maxGrains> grains {};
     int numActive = 0;              // active grains: the first numActive of the pool

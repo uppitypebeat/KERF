@@ -168,9 +168,11 @@ void ChopStrip::paint (juce::Graphics& g)
         const auto lit = glow.count (c.id) ? glow.at (c.id) : 0.0f;
 
         // Body
-        auto bg = i == hovered ? Colours::surfaceHover : Colours::surfaceRaised;
-        g.setColour (bg);
-        g.fillRoundedRectangle (b, Metrics::radiusSmall);
+        {
+            Face::State face; // the shared key face
+            face.hover = i == hovered;
+            Face::key (g, b, face);
+        }
 
         // The chop's colour: a bar along the top (always), and a wash + brighter bar while it
         // plays, plus a flash on every hit. Text stays readable.

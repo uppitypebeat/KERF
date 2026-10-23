@@ -8,7 +8,7 @@ namespace kerf
 {
 
 /** The toolbar's metronome: a short click on every beat, higher on the first beat of the bar,
-    always at KERF's BPM. Added to the output after CAPTURE, so it is heard but never
+    always at KERF's BPM. Added to the output last, so it is heard but never
     recorded, exported or resampled. Real-time safe.
 
     - A chop or the sample played from PLAY: a click where the playback passes one of the

@@ -80,6 +80,7 @@ void GrainView::updateBaseline()
 
 void GrainView::animationTick (double dt)
 {
+    const ScreenScope screenColours; // (colours picked here are the screen's too)
     if (! isVisible())
         return;
 
@@ -155,7 +156,7 @@ void GrainView::animationTick (double dt)
             {
                 const auto u = (float) ((v.grainPosition[(size_t) i].load (std::memory_order_relaxed) - start) / length);
                 const auto level = juce::jlimit (0.0f, 1.0f, v.grainLevel[(size_t) i].load (std::memory_order_relaxed));
-                live.push_back ({ u, level, v.grainPitch[(size_t) i].load (std::memory_order_relaxed) });
+                live.push_back ({ u, level, v.grainPitch[(size_t) i].load (std::memory_order_relaxed), v.grainCents[(size_t) i].load (std::memory_order_relaxed) });
                 levelSum += level;
 
                 const auto centre = u * (float) (bins - 1);
@@ -188,6 +189,17 @@ void GrainView::animationTick (double dt)
     // the core's arms turn while it sounds (FREEZE: everything holds still).
     const auto frozen = processor.getParameters().getRawParameterValue (Params::grainFreeze)->load() > 0.5f;
     const auto step = (float) std::min (dt, 0.05);
+    const auto glide = processor.getParameters().getRawParameterValue (Params::grainGlide)->load();
+    const auto hazeAmount = processor.getParameters().getRawParameterValue (Params::grainHaze)->load();
+    // HAZE: the reverb's tail as the haze clouds' light (rising quickly, fading with the tail).
+    {
+        const auto target = juce::jlimit (0.0f, 1.0f, processor.getHazeLevel() * 6.0f);
+        haze += (target - haze) * std::min (1.0f, step * (target > haze ? 6.0f : 1.5f));
+        if (haze < 0.002f && target <= 0.0f)
+            haze = 0.0f;
+        if (! frozen)
+            hazeTurn += step * (0.05f + 0.1f * haze);
+    }
     if (! frozen)
     {
         for (auto& p : particles)
@@ -213,6 +225,16 @@ void GrainView::animationTick (double dt)
                 p.life = 0.6f + 1.4f * sparkRandom.nextFloat();
                 p.size = 1.0f + 2.2f * gr.level * sparkRandom.nextFloat();
                 p.hue = juce::jlimit (0.0f, 1.0f, 0.5f + gr.semis / 48.0f + (sparkRandom.nextFloat() - 0.5f) * 0.3f);
+                p.rise += glide * 28.0f; // GLIDE: the sparks keep bending the grains' way
+                // HAZE: some sparks linger as fine dust: slower, much longer, small.
+                if (hazeAmount > 0.01f && sparkRandom.nextFloat() < 0.5f * hazeAmount)
+                {
+                    p.mist = true;
+                    p.drift *= 0.3f;
+                    p.rise *= 0.3f;
+                    p.life *= 2.0f + 2.5f * hazeAmount;
+                    p.size = 0.9f + 0.9f * sparkRandom.nextFloat();
+                }
                 particles.push_back (p);
                 ++born;
             }
@@ -272,7 +294,8 @@ void GrainView::animationTick (double dt)
 
     // At rest (silence, the landscape settled, nothing changed): no repaint. Grains only
     // count while audio runs: a paused host leaves the last ones standing.
-    const auto active = settling || intro < 1.0f || processor.isSounding() || ((! particles.empty() || ! meteors.empty() || ! shockwaves.empty()) && ! frozen);
+    const auto active = settling || intro < 1.0f || processor.isSounding() || haze > 0.0f
+                     || ((! particles.empty() || ! meteors.empty() || ! shockwaves.empty()) && ! frozen);
     if (idle.update (dt, active, processor.getParameterChangeCount() + (uint32_t) shownChopId))
         repaint();
 }
@@ -403,6 +426,7 @@ void GrainView::paint (juce::Graphics& g)
         drawText (g, readout, h, TextStyle::micro, Colours::textFaint, juce::Justification::centredRight);
     }
 
+    const ScreenScope screenColours; // the screens: dark displays in every theme (the frame round them is not)
     paintEngine (g, engineScreen);
     paintOscilloscope (g, oscScreen);
     paintVectorscope (g, vectorScreen);
@@ -494,6 +518,7 @@ void GrainView::paintEngine (juce::Graphics& g, juce::Rectangle<float> screen)
     auto param = [this] (const char* id) { return processor.getParameters().getRawParameterValue (id)->load(); };
     const auto frozen = param (Params::grainFreeze) > 0.5f;
     const auto shape = param (Params::grainShape);
+    const auto glideParam = param (Params::grainGlide);
     constexpr auto twoPi = juce::MathConstants<float>::twoPi;
     juce::Graphics::ScopedSaveState save (g);
     const auto inner = screen.reduced (1.0f);
@@ -550,6 +575,28 @@ void GrainView::paintEngine (juce::Graphics& g, juce::Rectangle<float> screen)
         g.drawLine ({ tail, head }, 1.6f);
         g.setColour (glint.withAlpha (A (alpha)));
         g.fillEllipse (juce::Rectangle<float> (2.6f, 2.6f).withCentre (head));
+    }
+
+    // HAZE: a wide band of fine dust round the galaxy (the reverb's tail): it turns slowly
+    // (the inner dust faster), each grain of dust twinkling, and glows on while the tail rings.
+    if (const auto hazeParam = param (Params::grainHaze); hazeParam > 0.001f || haze > 0.0f)
+    {
+        const auto glowOf = std::min (1.0f, 0.3f * hazeParam + haze);
+        uint32_t seed = 0x68617a65u;
+        auto next = [&seed] { seed = seed * 1664525u + 1013904223u; return (float) (seed >> 8) / (float) (1u << 24); };
+        const auto count = 120 + (int) (260.0f * hazeParam);
+        for (int k = 0; k < count; ++k)
+        {
+            const auto radius = 1.02f + 0.75f * std::pow (next(), 0.7f);   // how far out (in ring radii)
+            const auto height = (next() - 0.5f) * 0.5f * (radius - 0.9f); // thicker further out
+            const auto a = next() * twoPi + hazeTurn * 1.4f / radius;
+            const auto twinkle = 0.5f + 0.5f * std::sin ((float) time * (0.8f + 1.6f * next()) + next() * twoPi);
+            const auto size = 0.9f + 1.4f * next();
+            const auto hue = next();
+            const juce::Point<float> p (c.x + std::cos (a) * R * radius, c.y + std::sin (a) * R * radius * tilt - height * R);
+            g.setColour ((hue < 0.5f ? tone : second).interpolatedWith (glint, 0.25f).withAlpha (A (glowOf * (0.3f + 0.7f * twinkle))));
+            g.fillEllipse (juce::Rectangle<float> (size, size).withCentre (p));
+        }
     }
 
     // A place on the disc: u along the chop (0 at the left, round through the back),
@@ -644,6 +691,19 @@ void GrainView::paintEngine (juce::Graphics& g, juce::Rectangle<float> screen)
     };
 
     orbit (0.0f, tone.withAlpha (A (0.25f)), 1.0f, false);
+    // DETUNE: the ring doubles into two orbits that drift apart and back (beating).
+    if (const auto detune = param (Params::grainDetune); detune > 0.001f)
+    {
+        const auto beat = std::sin ((float) time * (1.5f + 4.0f * detune));
+        for (const auto side : { -1.0f, 1.0f })
+        {
+            juce::Path ring;
+            const auto spread = 1.0f + side * 0.035f * detune * (0.6f + 0.4f * beat);
+            ring.addEllipse (juce::Rectangle<float> (R * 2.0f * spread, R * 2.0f * tilt * spread).withCentre (c));
+            g.setColour ((side < 0.0f ? tone : second).withAlpha (A (0.10f + 0.22f * detune * (0.6f + 0.4f * side * beat))));
+            g.strokePath (ring, juce::PathStrokeType (0.9f));
+        }
+    }
     if (const auto scale = (int) param (Params::grainScale); scale > 0 && param (Params::grainPitchRnd) >= 1.0f)
     {
         static constexpr int octaves[] = { -24, -12, 12, 24 }, fifths[] = { -24, -17, -12, -5, 7, 12, 19, 24 };
@@ -674,6 +734,12 @@ void GrainView::paintEngine (juce::Graphics& g, juce::Rectangle<float> screen)
             const auto pos = at (p.u, R * p.radius, p.height * lift);
             const auto alpha = (1.0f - t) * (1.0f - t) * (back ? 0.5f : 0.85f);
             const auto colour = tone.interpolatedWith (second, p.hue);
+            if (p.mist) // HAZE: a speck of dust that lingers and fades slowly
+            {
+                g.setColour (colour.interpolatedWith (glint, 0.3f).withAlpha (A (0.7f * (1.0f - t))));
+                g.fillEllipse (juce::Rectangle<float> (p.size, p.size).withCentre (pos));
+                continue;
+            }
             const auto size = p.size * (1.0f - 0.5f * t);
             const auto trail = at (p.u - 0.006f / std::max (0.3f, p.radius), R * (p.radius - p.drift * 0.07f), (p.height - p.rise * 0.07f) * lift);
             g.setColour (colour.withAlpha (A (alpha * 0.45f)));
@@ -810,7 +876,7 @@ void GrainView::paintEngine (juce::Graphics& g, juce::Rectangle<float> screen)
         g.setGradientFill (juce::ColourGradient (tone.withAlpha (A (0.35f + 0.3f * glow)), p, tone.withAlpha (A (0.0f)), p.translated (0.0f, -R * 0.55f), false));
         g.fillRect (juce::Rectangle<float> (p.x - 1.0f, p.y - R * 0.55f, 2.0f, R * 0.55f));
         const auto still = param (Params::grainScan) < 0.001f;
-        spaceText (g, frozen ? "FROZEN" : (still ? "HOLD" : "SCAN"), { p.x + 10.0f, p.y + 4.0f, 70.0f, 12.0f }, 0.75f);
+        spaceText (g, frozen ? "FROZEN" : (still ? "HOLD" : "SPEED"), { p.x + 10.0f, p.y + 4.0f, 70.0f, 12.0f }, 0.75f);
     }
 
     paintParticles (false);
@@ -826,6 +892,31 @@ void GrainView::paintEngine (juce::Graphics& g, juce::Rectangle<float> screen)
         const auto colour = tone.interpolatedWith (second, juce::jlimit (0.0f, 1.0f, 0.5f + gr.semis / 48.0f));
         g.setColour (colour.withAlpha (A (0.25f * gr.level))); // a thread down to the disc
         g.drawLine (p.x, p.y, p.x, at (gr.u, R, 0.0f).y, 0.8f);
+        // GLIDE: a trail of light behind the grain, the way it came (it bends up: the trail
+        // hangs below it, and curls a little along the ring).
+        if (std::abs (glideParam) > 0.01f)
+        {
+            juce::Path trail;
+            trail.startNewSubPath (p);
+            const auto fall = glideParam * GrainLimits::glideSemitones * lift * 0.9f;
+            trail.quadraticTo (p.translated (-6.0f * glideParam, fall * 0.5f), p.translated (-14.0f * std::abs (glideParam), fall));
+            glowStroke (g, trail, colour.withAlpha (A (0.65f * gr.level)), 1.4f, 0.5f * gr.level);
+        }
+        // DETUNE: two twins beside it, flickering in and out of step (the beating).
+        if (std::abs (gr.cents) > 0.5f)
+        {
+            const auto offset = 6.0f + std::abs (gr.cents) * 0.3f;
+            const auto flicker = 0.5f + 0.5f * std::sin ((float) time * (2.0f + std::abs (gr.cents) * 0.2f) + gr.u * 40.0f);
+            for (const auto side : { -1.0f, 1.0f })
+            {
+                const auto twin = p.translated (side * offset, side * gr.cents * 0.05f);
+                const auto twinAlpha = 0.35f + 0.6f * (side > 0.0f ? flicker : 1.0f - flicker);
+                g.setGradientFill (juce::ColourGradient (colour.withAlpha (A (0.35f * twinAlpha)), twin, colour.withAlpha (0.0f), twin.translated (r * 2.5f, 0.0f), true));
+                g.fillEllipse (juce::Rectangle<float> (r * 5.0f, r * 5.0f).withCentre (twin));
+                g.setColour (glint.interpolatedWith (colour, 0.5f).withAlpha (A (twinAlpha * (0.4f + 0.6f * gr.level))));
+                g.fillEllipse (juce::Rectangle<float> (r * 1.1f, r * 1.1f).withCentre (twin));
+            }
+        }
         g.setGradientFill (juce::ColourGradient (colour.withAlpha (A (0.5f * gr.level)), p, colour.withAlpha (A (0.0f)), p.translated (r * 4.0f, 0.0f), true));
         g.fillEllipse (juce::Rectangle<float> (r * 8.0f, r * 8.0f).withCentre (p));
         g.setColour (glint.interpolatedWith (colour, 0.3f).withAlpha (A (0.6f + 0.4f * gr.level)));
@@ -894,7 +985,7 @@ void GrainView::paintEngine (juce::Graphics& g, juce::Rectangle<float> screen)
     else if (live.empty())
     {
         const auto texture = processor.getParameters().getRawParameterValue (Params::grainMix)->load();
-        spaceText (g, texture < 0.001f ? "TEXTURE 0  -  TURN IT UP AND PLAY A CHOP" : "PLAY A CHOP",
+        spaceText (g, texture < 0.001f ? "GRAINS 0  -  TURN IT UP AND PLAY A CHOP" : "PLAY A CHOP",
                    screen.withTrimmedTop (22.0f).withHeight (14.0f), 0.45f, juce::Justification::centred);
     }
 }
