@@ -116,10 +116,11 @@ PatternView::PatternView (KerfAudioProcessor& p, AnimationClock& c) : processor 
     {
         processor.getUndoManager().beginNewTransaction ("Clear pattern");
         processor.getPattern().clear();
+        processor.getPattern().clearLocks();
     };
 
     addAndMakeVisible (dice);
-    dice.setTooltip ("Random pattern for your chops. Right-click: mode and style");
+    dice.setTooltip ("Random pattern for your chops (locked steps stay). Right-click: mode and style");
     dice.onClick = [this] { randomPattern(); };
     dice.onRightClick = [this] { showDiceMenu(); };
 
@@ -439,6 +440,27 @@ void PatternView::paint (juce::Graphics& g)
         }
     }
 
+    // LOCKS: a small padlock in the corner of every locked step; an empty locked step also
+    // gets an outline in the accent (it stays empty when the die rolls).
+    for (const auto lockedStep : processor.getPattern().getLocks())
+    {
+        const auto i = lockedStep - page * stepsPerPage;
+        if (i < 0 || i >= stepsPerPage)
+            continue;
+        const auto b = cellBounds (i);
+        if (! processor.getPattern().eventAt (lockedStep).has_value())
+        {
+            g.setColour (Colours::accent.withAlpha (0.55f));
+            g.drawRoundedRectangle (b.reduced (1.5f), Metrics::radiusSmall, Metrics::hairline);
+        }
+        const auto body = juce::Rectangle<float> (7.0f, 5.5f).withPosition (b.getRight() - 11.0f, b.getY() + 7.0f);
+        juce::Path shackle;
+        shackle.addCentredArc (body.getCentreX(), body.getY(), 2.4f, 2.6f, 0.0f, -juce::MathConstants<float>::halfPi, juce::MathConstants<float>::halfPi, true);
+        g.setColour (Colours::accent);
+        g.strokePath (shackle, juce::PathStrokeType (1.2f));
+        g.fillRoundedRectangle (body, 1.0f);
+    }
+
 }
 
 void PatternView::animationTick (double dt)
@@ -480,6 +502,16 @@ void PatternView::mouseDown (const juce::MouseEvent& e)
     if (e.mods.isPopupMenu())
     {
         showStepMenu (step);
+        return;
+    }
+
+    if (e.mods.isAltDown()) // Alt + click: the die keeps this step (or no longer)
+    {
+        const auto at = pattern.eventAt (step);
+        const auto lockStep = at.has_value() ? at->step : step;
+        um.beginNewTransaction (pattern.isLocked (lockStep) ? "Unlock step" : "Lock step");
+        pattern.setLocked (lockStep, ! pattern.isLocked (lockStep));
+        drag = Drag::none;
         return;
     }
 
@@ -662,10 +694,24 @@ void PatternView::showStepMenu (int step)
         });
     }
 
+    // LOCK: the die keeps this step as it is (also an empty one). Alt + click does the same.
+    const auto lockStep = existing.has_value() ? existing->step : step;
+    auto addLock = [&menu, &pattern, &um, lockStep]
+    {
+        const auto locked = pattern.isLocked (lockStep);
+        menu.addItem ("Lock (the die keeps it)   Alt + click", true, locked, [&pattern, &um, lockStep, locked]
+        {
+            um.beginNewTransaction (locked ? "Unlock step" : "Lock step");
+            pattern.setLocked (lockStep, ! locked);
+        });
+    };
+
     if (! existing.has_value())
     {
-        // An empty step: just the chops.
+        // An empty step: the lock, then the chops.
         menu.addSectionHeader ("STEP " + juce::String (step + 1));
+        addLock();
+        menu.addSeparator();
         for (auto it = juce::PopupMenu::MenuItemIterator (chopMenu); it.next();)
             menu.addItem (it.getItem());
     }
@@ -680,6 +726,8 @@ void PatternView::showStepMenu (int step)
         };
 
         menu.addSectionHeader ("STEP " + juce::String (s + 1));
+        addLock();
+        menu.addSeparator();
         menu.addSubMenu ("Chop", chopMenu);
 
         juce::PopupMenu repeatMenu, chanceMenu, pitchMenu, velocityMenu;
@@ -799,6 +847,7 @@ void PatternView::showDiceMenu()
     const auto mode = (int) processor.getSettings().getProperty ("diceMode", 0);
     juce::PopupMenu menu;
     menu.addSectionHeader ("MODE");
+    menu.addItem (300, "Auto - a different mode every roll", true, mode < 0);
     static const char* modeHints[] = { "musical, varied", "rhythm first", "dense, short, fast", "pitch and melody",
                                        "held, ghosted, airy", "sparse, lots of space", "wild" };
     const auto modes = PatternDice::modeNames();
@@ -815,7 +864,9 @@ void PatternView::showDiceMenu()
                         {
                             if (safe == nullptr || result == 0)
                                 return;
-                            if (result >= 200)
+                            if (result == 300)
+                                safe->processor.getSettings().setProperty ("diceMode", -1, nullptr); // Auto
+                            else if (result >= 200)
                                 safe->processor.getSettings().setProperty ("diceMode", result - 200, nullptr);
                             else
                                 safe->diceStyle = result >= 100 ? result - 100 : -1;
@@ -840,11 +891,21 @@ void PatternView::randomPattern()
     PatternDice::Options options;
     options.bars = pattern.getBars();
     options.bpm = info.sourceBpm;
+    options.originSeconds = processor.getChops().getBeatOrigin() / info.sample->sampleRate; // the beat lines (SHIFT)
     options.tonic = key.tonic;
     options.minor = key.tonic < 0 || key.minor;
     options.style = diceStyle;
     options.avoidStyle = lastDiceStyle;
+    // MODE: the one chosen, or (Auto) a different one every roll.
+    const auto autoMode = (int) processor.getSettings().getProperty ("diceMode", 0) < 0;
     options.mode = (int) processor.getSettings().getProperty ("diceMode", 0);
+    if (autoMode)
+    {
+        const auto count = PatternDice::modeNames().size();
+        do options.mode = juce::Random::getSystemRandom().nextInt (count);
+        while (count > 1 && options.mode == lastAutoMode);
+        lastAutoMode = options.mode;
+    }
     options.seed = juce::Random::getSystemRandom().nextInt64(); // a new pattern every time (and the same one again from this seed)
     options.recent = &recent;
     // Never a pattern seen in the last rolls (with few chops and one bar the same can come up).
@@ -862,10 +923,18 @@ void PatternView::randomPattern()
         recentPatterns.pop_front();
     lastDiceStyle = rolled.style;
 
+    // LOCKS: the locked steps keep what they have (a chop, or nothing); the roll fills the rest.
+    const auto locked = pattern.getLocks();
+    std::vector<PatternEvent> kept;
+    for (const auto& e : pattern.getEvents())
+        if (std::binary_search (locked.begin(), locked.end(), e.step))
+            kept.push_back (e);
+    const auto merged = locked.empty() ? rolled.events : PatternDice::withLocks (rolled.events, kept, locked);
+
     auto& um = processor.getUndoManager();
     um.beginNewTransaction ("Random pattern");
     pattern.clear();
-    for (const auto& e : rolled.events)
+    for (const auto& e : merged)
     {
         pattern.setEvent (e.step, e.chopId, e.length, e.velocity);
         if (e.pitch != 0)    pattern.setPitch (e.step, e.pitch);
@@ -881,7 +950,9 @@ void PatternView::randomPattern()
 
     // What it made, in a few words.
     auto text = "Dice: " + rolled.name;
-    if (options.mode != 0)
+    if (autoMode)
+        text = "Dice Auto (" + PatternDice::modeNames()[options.mode] + "): " + rolled.name;
+    else if (options.mode != 0)
         text = "Dice " + PatternDice::modeNames()[options.mode] + ": " + rolled.name;
     if (rolled.idea.isNotEmpty())
         text << " - " << rolled.idea;

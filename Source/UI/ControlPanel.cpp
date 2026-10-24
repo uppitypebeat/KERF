@@ -119,11 +119,17 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
 
     // --- SPACE -------------------------------------------------------------------
     attachParam (addKnob (space, 0.0), Params::space);
-    space.setTooltip ("Stereo echoes in time with the tempo");
+    space.setTooltip ("Echoes in time with the tempo");
+    addAndMakeVisible (spaceTime);
+    attachChoice (spaceTime, Params::spaceTime);
+    spaceTime.setTooltip ("How fast the echoes come (a note value at the tempo). Click: the next one, right-click: all");
+    addAndMakeVisible (spaceMode);
+    attachChoice (spaceMode, Params::spaceMode);
+    spaceMode.setTooltip ("PING-PONG bounces the echoes left and right, STEREO keeps each side's own");
     spaceSend.setRange (0.0, 1.0, 0.0);
     spaceSend.textFromValueFunction = percentText;
     bindChop (addKnob (spaceSend, 1.0), IDs::spaceSend);
-    spaceSend.setTooltip ("How much of this chop goes into ECHO");
+    spaceSend.setTooltip ("How much of this chop goes into the DELAY");
 
     // --- GRAIN -------------------------------------------------------------------
     attachParam (addKnob (grainMix, 0.0), Params::grainMix);
@@ -193,10 +199,18 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
     }
     grainDensity.setTooltip ("Grains per second");
 
+    // GRAINS at 0 %: the rest of the page does nothing, so it is greyed out and locked.
+    {
+        auto grainsOn = std::make_unique<juce::ParameterAttachment> (*processor.getParameters().getParameter (Params::grainMix),
+                                                                     [this] (float) { updateGrainControls(); });
+        grainsOn->sendInitialUpdate();
+        choiceAttachments.push_back (std::move (grainsOn));
+    }
 
-    // --- DIRT / WOBBLE ------------------------------------------------------------
+
+    // --- DIST / WOBBLE ------------------------------------------------------------
     attachParam (addKnob (dirt, 0.0), Params::drive);
-    dirt.setTooltip ("Distortion: WARM, FUZZ or CRUSH");
+    dirt.setTooltip ("Distortion: WARM saturates, FUZZ clips, CRUSH lowers the bits");
     addAndMakeVisible (dirtMode);
     attachChoice (dirtMode, Params::dirtMode);
 
@@ -210,8 +224,9 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
     addAndMakeVisible (pumpMode);
     attachChoice (pumpMode, Params::pumpMode);
 
-    for (auto* s : { &dirtMode, &wobbleMode, &pumpMode, &timeLength })
-        s->setVertical (true); // compact: the options stand next to the knob
+    for (auto* s : { &spaceTime, &spaceMode, &dirtMode, &wobbleMode, &pumpMode })
+        s->setCycling (true); // FX: the mode as one word under its knob (click: the next one)
+    timeLength.setVertical (true); // compact: the options stand next to the knob
 
     // --- TIME --------------------------------------------------------------------
     addAndMakeVisible (timeSlots);
@@ -229,6 +244,7 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
     attachParam (addKnob (filter, 0.0), Params::filter);
     filter.setTooltip ("Left: low-pass. Right: high-pass");
     attachParam (addKnob (resonance, 0.2), Params::resonance);
+    resonance.setTooltip ("Resonance: a peak at the filter's cutoff - higher sounds sharper, ringing, more synth-like");
 
     //==========================================================================
     // Sections: content and layout. Knob spacing (pitch) is shared per page.
@@ -271,13 +287,38 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
     constexpr int centredY = 24 + (panelHeight - 24 - Knob::preferredHeight (Knob::Size::large)) / 2; // GRANULIZER row
     constexpr float compactWidth = heroW + 8.0f + 66.0f;
 
-    // A knob with its mode options stacked beside it (DIRT, WOBBLE, PUMP).
+    // A knob with its options stacked beside it (TIME: MIX and the cycle).
     auto compact = [] (juce::Rectangle<float> c, Knob& k, Segmented& modes)
     {
         k.setBounds ((int) c.getX(), fxY, (int) heroW, heroH);
         const auto rowH = 25;
         const auto h = rowH * modes.getNumOptions();
         modes.setBounds ((int) (c.getX() + heroW + 8.0f), fxY + (heroH - 22 - h) / 2 + 2, 66, h); // centred on the disc
+    };
+
+    // FX page, minimal: five equal columns, each a big knob with its mode as one word under
+    // it (DELAY: its time and mode); RES and the chop's DELAY send as small knobs at the lower
+    // right of their knob. Thin lines between the columns, no headers (the knobs say what they are).
+    constexpr float fxColumn = heroW + 46.0f;
+    constexpr int fxTop = (panelHeight - (heroH + 22)) / 2;
+    auto fx = [] (juce::Rectangle<float> c, Knob& k, Segmented* modes, Knob* side, Segmented* second = nullptr)
+    {
+        // The knob, or the knob with its small one beside it, centred in the column as a group.
+        const auto sw = Knob::preferredWidth (Knob::Size::small), sh = Knob::preferredHeight (Knob::Size::small);
+        constexpr int overlap = 8; // the small knob tucks in a little at the big one's lower right
+        const auto groupWidth = (int) heroW + (side != nullptr ? sw - overlap : 0);
+        const auto x = juce::roundToInt (c.getCentreX()) - groupWidth / 2;
+        k.setBounds (x, fxTop, (int) heroW, heroH);
+        const auto cx = juce::roundToInt (c.getCentreX());
+        if (modes != nullptr && second != nullptr) // two words side by side (DELAY: its time and mode)
+        {
+            modes->setBounds (cx - 66, fxTop + heroH + 2, 56, 20);
+            second->setBounds (cx - 6, fxTop + heroH + 2, 72, 20);
+        }
+        else if (modes != nullptr)
+            modes->setBounds (cx - 50, fxTop + heroH + 2, 100, 20);
+        if (side != nullptr)
+            side->setBounds (x + (int) heroW - overlap, fxTop + Knob::discBottom (Knob::Size::hero) - Knob::discBottom (Knob::Size::small), sw, sh); // its disc, name and value level with the big knob's
     };
 
     sections = {
@@ -312,26 +353,17 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
               choke.setBounds (x + labelW + gap, selectorY, groupsW, 22);
           } },
 
-        // FX page: big knobs, vertically centred in the panel; mode options beside the knob.
-        { "ECHO", [] { return juce::String(); }, 1, { &space, &spaceSend }, 0, heroW + 4.0f + (float) Knob::preferredWidth (Knob::Size::small),
-          [this] (juce::Rectangle<float> c, int)
-          {
-              space.setBounds ((int) c.getX(), fxY, (int) heroW, heroH);
-              const auto sw = Knob::preferredWidth (Knob::Size::small), sh = Knob::preferredHeight (Knob::Size::small);
-              spaceSend.setBounds ((int) (c.getX() + heroW + 4.0f), fxY + (heroH - sh) / 2, sw, sh);
-          } },
-        { "DIRT", [] { return juce::String(); }, 1, { &dirt, &dirtMode }, 0, compactWidth,
-          [this, compact] (juce::Rectangle<float> c, int) { compact (c, dirt, dirtMode); } },
-        { "WOBBLE", [] { return juce::String(); }, 1, { &wobble, &wobbleMode }, 0, compactWidth,
-          [this, compact] (juce::Rectangle<float> c, int) { compact (c, wobble, wobbleMode); } },
-        { "FILTER", [] { return juce::String(); }, 1, { &filter, &resonance }, 0, 2.0f * heroW + 10.0f,
-          [this] (juce::Rectangle<float> c, int)
-          {
-              filter.setBounds ((int) c.getX(), fxY, (int) heroW, heroH);
-              resonance.setBounds ((int) (c.getX() + heroW + 10.0f), fxY, (int) heroW, heroH);
-          } },
-        { "PUMP", [] { return juce::String(); }, 1, { &pump, &pumpMode }, 0, compactWidth,
-          [this, compact] (juce::Rectangle<float> c, int) { compact (c, pump, pumpMode); } },
+        // FX page (see fx above).
+        { {}, [] { return juce::String(); }, 1, { &space, &spaceSend, &spaceTime, &spaceMode }, 0, fxColumn,
+          [this, fx] (juce::Rectangle<float> c, int) { fx (c, space, &spaceTime, &spaceSend, &spaceMode); } },
+        { {}, [] { return juce::String(); }, 1, { &dirt, &dirtMode }, 0, fxColumn,
+          [this, fx] (juce::Rectangle<float> c, int) { fx (c, dirt, &dirtMode, nullptr); } },
+        { {}, [] { return juce::String(); }, 1, { &wobble, &wobbleMode }, 0, fxColumn,
+          [this, fx] (juce::Rectangle<float> c, int) { fx (c, wobble, &wobbleMode, nullptr); } },
+        { {}, [] { return juce::String(); }, 1, { &filter, &resonance }, 0, fxColumn,
+          [this, fx] (juce::Rectangle<float> c, int) { fx (c, filter, nullptr, &resonance); } },
+        { {}, [] { return juce::String(); }, 1, { &pump, &pumpMode }, 0, fxColumn,
+          [this, fx] (juce::Rectangle<float> c, int) { fx (c, pump, &pumpMode, nullptr); } },
 
         // GRANULIZER page: one row of knobs, vertically centred; the switches sit at the right
         // of their section's header line (SYNC with CLOUD, FREEZE with MOTION, the RANDOM
@@ -358,7 +390,7 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
           [this, largeRow] (juce::Rectangle<float> c, int pitch) { largeRow (c, pitch, { &grainSpread, &grainReverse, &grainHaze, &grainSend }, centredY); } },
 
         // TIME page: the slots as cards over all the width there is; MIX with the cycle
-        // stacked beside it at the right (compact, like the FX knobs).
+        // stacked beside it at the right (compact).
         { "SHAPES", [this] { const auto a = (int) processor.getParameters().getRawParameterValue (Params::timeSlot)->load();
                             return a > 0 ? juce::String (TimeFactory::name (a - 1)) + "  -  CLICK AGAIN: DESELECT" : (processor.isTimeSlotEdited (KerfAudioProcessor::ownTimeCurves) ? juce::String ("NONE  -  YOUR OWN CURVES PLAY") : juce::String ("NONE  -  CLICK ONE, OR DRAW ABOVE")); },
           4, { &timeSlots, &timeBank }, 0, 0.0f,
@@ -528,6 +560,18 @@ juce::String ControlPanel::chopTag() const
     return "NO CHOP";
 }
 
+void ControlPanel::updateGrainControls()
+{
+    const auto on = processor.getParameters().getRawParameterValue (Params::grainMix)->load() > 0.0005f;
+    for (auto* c : std::initializer_list<juce::Component*> { &grainDensity, &grainSize, &grainShape, &grainSync, &grainScan, &grainPosition,
+                                                            &grainSpray, &grainDrift, &grainFreeze, &grainPitchShift, &grainPitch, &grainDetune,
+                                                            &grainGlide, &grainShimmer, &grainScale, &grainSpread, &grainReverse, &grainHaze })
+        c->setEnabled (on);
+    // CHOP AMT also needs a chop to set it for.
+    const auto hasChop = processor.getSampleInfo().sample != nullptr && processor.getEffectiveChop (selectedChopId()).has_value();
+    grainSend.setEnabled (on && hasChop);
+}
+
 void ControlPanel::syncFromModel()
 {
     const juce::ScopedValueSetter<bool> svs (syncing, true);
@@ -590,6 +634,7 @@ void ControlPanel::syncFromModel()
         choke.setSelected (juce::jlimit (0, choke.getNumOptions() - 1, chop->chokeGroup), juce::dontSendNotification);
     }
 
+    updateGrainControls(); // (CHOP AMT: enabled above by the chop, but not with GRAINS at 0 %)
     repaint();
 }
 

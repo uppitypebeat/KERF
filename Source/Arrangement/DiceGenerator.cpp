@@ -105,6 +105,8 @@ namespace
             for (const auto& c : chops)
             {
                 auto weight = std::pow (std::max (0.02f, roleFit (c, role)), 2.0f);
+                // The best chops: a quiet one or a scrap (under 40 ms) seldom gets a part.
+                weight *= juce::jlimit (0.1f, 1.0f, c.level * 2.5f) * (c.seconds < 0.04 ? 0.2f : 1.0f);
                 weight /= 1.0f + usagePenalty * (float) uses[c.id];
                 if (const auto r = recentUse.find (c.id); r != recentUse.end())
                     weight /= 1.0f + recentPenalty * std::min (3.0f, (float) r->second / 8.0f);
@@ -358,8 +360,8 @@ namespace
         // The motif's chops: a head (groove or impact), then a few others.
         const auto melodicMode = mode.tools[pitchTool] >= 1.0f; // MELODIC
         const auto headRole = melodicMode ? Role::melodic : (odds (0.5f) ? Role::groove : Role::impact);
-        const auto maxChops = std::min ((int) chops.size(), maxMotifChops);
-        const auto count = juce::jlimit (1, maxChops, 2 + rng.nextInt (std::max (1, maxChops - 1)) - (mode.density < 0.3f ? 1 : 0));
+        const auto chopLimit = std::min ((int) chops.size(), maxMotifChops);
+        const auto count = juce::jlimit (1, chopLimit, 2 + rng.nextInt (std::max (1, chopLimit - 1)) - (mode.density < 0.3f ? 1 : 0));
         std::vector<int> motif { pickChop (headRole) };
         std::set<int> inMotif { motif.front() };
         static const std::array<Role, 5> others { Role::percussive, Role::fill, Role::groove, Role::melodic, Role::texture };
@@ -718,20 +720,25 @@ namespace
     {
         const auto bars = juce::jlimit (1, 8, options.bars);
         const auto punchiest = std::max_element (chops.begin(), chops.end(), [] (const ChopTraits& a, const ChopTraits& b) { return a.punch < b.punch; });
-        drums = punchiest->punch > 0.15f && chops.size() >= 2;
-        tonal = std::any_of (chops.begin(), chops.end(), [] (const ChopTraits& c) { return c.sustain > 0.25f; });
+        // Drums: hits - short and hard - among the chops (a sung phrase starts hard too, but rings on).
+        const auto hits = std::count_if (chops.begin(), chops.end(), [] (const ChopTraits& c) { return c.punch > 0.25f && c.sustain < 0.35f; });
+        drums = punchiest->punch > 0.15f && chops.size() >= 2 && hits >= std::max<std::ptrdiff_t> (1, (std::ptrdiff_t) chops.size() / 3);
+        // Tonal: chops that ring on with a pitch heard (a dense drum loop rings on too, without one).
+        const auto tones = std::count_if (chops.begin(), chops.end(), [] (const ChopTraits& c) { return c.sustain > 0.25f && c.pitchClass >= 0; });
+        tonal = tones >= std::max<std::ptrdiff_t> (1, (std::ptrdiff_t) chops.size() / 5);
         std::vector<double> lengths;
         for (const auto& c : chops)
             lengths.push_back (c.seconds);
         std::nth_element (lengths.begin(), lengths.begin() + (std::ptrdiff_t) lengths.size() / 2, lengths.end());
         const auto slices = chops.size() >= 3 && lengths[lengths.size() / 2] >= stepSeconds * 2.0;
+        const auto placed = placesInLoop (chops, options.bpm, options.originSeconds).size() >= 3; // the loop's own groove is there
 
         ctx.style = options.style >= 0 && options.style < numStyles ? options.style
-                  : pickStyle (options.bpm, drums, tonal, slices, options.avoidStyle, rng);
+                  : pickStyle (options.bpm, drums, tonal, slices, placed, options.avoidStyle, rng);
         if (ctx.style == chopUp)
         {
-            ctx.form = "SLICES IN ORDER";
-            return chopUpBars (chops, bars, options.bpm, rng);
+            ctx.form = placed ? "the loop's own groove, flipped" : "SLICES IN ORDER";
+            return chopUpBars (chops, bars, options.bpm, options.originSeconds, rng);
         }
 
         chooseTools();

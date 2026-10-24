@@ -13,7 +13,7 @@ namespace kerf
 class PatternModel
 {
 public:
-    static const juce::Identifier PATTERN, EVENT, bars, step, length, chop, velocity, pitch, chance, repeats, random, slide;
+    static const juce::Identifier PATTERN, EVENT, bars, step, length, chop, velocity, pitch, chance, repeats, random, slide, locks;
 
     explicit PatternModel (juce::UndoManager* undo = nullptr);
 
@@ -44,6 +44,14 @@ public:
     void setRandom (int stepIndex, int mode);   // 0 own chop, 1 nearby, 2 any
     void setSlide (int stepIndex, bool slide);
     void clear();
+
+    /** LOCKS: steps the die keeps as they are (a chop on them, or empty), kept with the pattern;
+        undoable. */
+    bool isLocked (int stepIndex) const;
+    void setLocked (int stepIndex, bool locked);
+    std::vector<int> getLocks() const;   // ascending, inside the pattern's length
+    void clearLocks();
+
 
     /** Drops events whose chop no longer exists. */
     void removeEventsForMissingChops (const std::vector<int>& existingChopIds);

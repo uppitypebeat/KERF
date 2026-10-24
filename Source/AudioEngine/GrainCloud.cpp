@@ -236,7 +236,7 @@ void GrainCloud::render (const SampleData& sample, const ChopParams& chop, const
     // 4-point Hermite interpolation: clean when grains are pitched (linear dulls and grits).
     auto read = [] (const float* d, double p, int64_t total) noexcept
     {
-        const auto i = (int64_t) std::floor (p);
+        const auto i = (int64_t) p; // (p is never negative: a truncation is the floor)
         const auto f = (float) (p - (double) i);
         float xm1, x0, x1, x2;
         if (i >= 1 && i + 2 < total)
@@ -313,67 +313,98 @@ void GrainCloud::render (const SampleData& sample, const ChopParams& chop, const
     }
     primed = true;
 
+    // Each grain renders its whole stretch of the block in one go (grain by grain, not sample
+    // by sample: far less bookkeeping per sample, and its state stays in registers). First the
+    // grains already sounding, then each new one from the sample it starts at. A grain that
+    // ends is let go at once, so its place in the pool is free for the next.
+    const auto regionEnd = regionStart + regionLen;
+    auto renderGrain = [&] (int index, int from)
+    {
+        auto& g = grains[(size_t) index];
+        const auto to = std::min (numSamples, from + (g.length - g.age));
+        auto position = g.position, step = g.step;
+        const auto stepMul = g.stepMul, scale = g.scale;
+        auto envPhase = g.envPhase;
+        const auto envStep = g.envStep, gainL = g.gainL, gainR = g.gainR;
+        const auto* srcL = g.srcL;
+        const auto* srcR = g.srcR;
+        const auto length = g.levelLength;
+        const auto glides = stepMul != 1.0;
+        for (int n = from; n < to; ++n)
+        {
+            // The envelope from the block's table (no cos / exp per grain and sample).
+            const auto idx = (int) envPhase;
+            const auto env = envTable[(size_t) idx] + (envPhase - (float) idx) * (envTable[(size_t) idx + 1] - envTable[(size_t) idx]);
+            const auto at = position * scale;
+            const auto left = read (srcL, at, length);
+            outL[n] += left * env * gainL;
+            outR[n] += (mono ? left : read (srcR, at, length)) * env * gainR;
+
+            position += step;
+            if (glides)
+                step *= stepMul; // GLIDE
+            // Wrap inside the chop so long grains on short chops never leave the region.
+            if (position < regionStart || position >= regionEnd)
+                position = regionStart + std::fmod (std::fmod (position - regionStart, regionLen) + regionLen, regionLen);
+            envPhase = std::min ((float) envTableSize, envPhase + envStep);
+        }
+        g.position = position;
+        g.step = step;
+        g.envPhase = envPhase;
+        g.age += to - from;
+        if (g.age < g.length)
+            return false;
+        // Done: the last active grain takes its place.
+        g.active = false;
+        if (index != --numActive)
+        {
+            g = grains[(size_t) numActive];
+            grains[(size_t) numActive].active = false;
+        }
+        return true;
+    };
+
+    for (int i = 0; i < numActive;)
+        if (! renderGrain (i, 0))
+            ++i;
+
     for (int n = 0; n < numSamples; ++n)
     {
         if (positional)
         {
             for (int guard = 0; guard < maxGrains && (forward ? readHead >= triggerAt (nextGrain, jitter) : readHead <= triggerAt (nextGrain, jitter)); ++guard)
             {
+                const auto before = numActive;
                 spawnGrain (nextGrain, 0);
+                if (numActive > before)
+                    renderGrain (numActive - 1, n);
                 nextGrain += forward ? 1 : -1;
             }
         }
         else if ((samplesToNextGrain -= 1.0) <= 0.0)
         {
+            const auto before = numActive;
             spawn (sample, chop, s, baseRate, 0, readHead);
+            if (numActive > before)
+                renderGrain (numActive - 1, n);
             samplesToNextGrain += interval * (1.0 + jitter * (nextRandom() * 2.0 - 1.0));
         }
 
-        float l = 0.0f, r = 0.0f;
-        for (int i = 0; i < numActive;)
-        {
-            auto& g = grains[(size_t) i];
-
-            // The envelope from the block's table (no cos / exp per grain and sample).
-            const auto idx = (int) g.envPhase;
-            const auto env = envTable[(size_t) idx] + (g.envPhase - (float) idx) * (envTable[(size_t) idx + 1] - envTable[(size_t) idx]);
-            const auto at = g.position * g.scale;
-            const auto left = read (g.srcL, at, g.levelLength);
-            l += left * env * g.gainL;
-            r += (mono ? left : read (g.srcR, at, g.levelLength)) * env * g.gainR;
-
-            g.position += g.step;
-            g.step *= g.stepMul; // GLIDE
-            // Wrap inside the chop so long grains on short chops never leave the region.
-            if (g.position < regionStart || g.position >= regionStart + regionLen)
-                g.position = regionStart + std::fmod (std::fmod (g.position - regionStart, regionLen) + regionLen, regionLen);
-
-            g.envPhase = std::min ((float) envTableSize, g.envPhase + g.envStep);
-            if (++g.age >= g.length)
-            {
-                // Done: the last active grain takes its place (it has not played this sample yet).
-                g.active = false;
-                if (i != --numActive)
-                {
-                    g = grains[(size_t) numActive];
-                    grains[(size_t) numActive].active = false;
-                }
-                continue;
-            }
-            ++i;
-        }
-
-        // A soft ceiling: a very dense cloud rounds off instead of clipping hard.
-        outL[n] = softLimit (l * norm);
-        outR[n] = softLimit (r * norm);
-
         readHead += headStep;
-        if (readHead < regionStart || readHead >= regionStart + regionLen)
+        if (readHead < regionStart || readHead >= regionEnd)
         {
             readHead = regionStart + std::fmod (std::fmod (readHead - regionStart, regionLen) + regionLen, regionLen);
             if (positional)
                 resync(); // round again (LOOP): the grains of the new pass, from where it is
         }
+    }
+
+    // The level for the overlap, and a soft ceiling: a very dense cloud rounds off instead of
+    // clipping hard.
+    for (int n = 0; n < numSamples; ++n)
+    {
+        outL[n] = softLimit (outL[n] * norm);
+        outR[n] = softLimit (outR[n] * norm);
     }
 }
 

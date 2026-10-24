@@ -386,7 +386,9 @@ void HeaderBar::showPresetMenu()
     juce::PopupMenu menu;
     const auto current = processor.getPresetName();
 
-    // Default: every setting back to where a new KERF starts (the sample and chops stay).
+    // Random: a new random sound for the effects, every click. Default: every setting back
+    // to where a new KERF starts (the sample and chops stay).
+    menu.addItem ("Random", true, current == "Random", [this] { processor.randomPreset(); });
     menu.addItem ("Default", true, current == "Default", [this] { processor.initPreset(); });
 
     // Factory sounds, one submenu per category (they shape the effects around your chops).

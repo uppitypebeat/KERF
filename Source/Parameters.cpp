@@ -1,6 +1,7 @@
 #include "Parameters.h"
 #include "Effects/TimeShaper.h"
 #include "AudioEngine/GrainCloud.h"
+#include "Effects/PingPongDelay.h"
 
 namespace kerf::Params
 {
@@ -66,7 +67,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 
     // SPACE ------------------------------------------------------------------------
     // One macro knob: tempo-locked ping-pong echoes; amount sets level, length, width and tone.
-    layout.add (std::make_unique<F> (pid (space), "Echo", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent()));
+    layout.add (std::make_unique<F> (pid (space), "Delay", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent()));
+    {
+        juce::StringArray times;
+        for (const auto* name : PingPongDelay::Time::names)
+            times.add (name);
+        layout.add (std::make_unique<C> (pid (spaceTime), "Delay Time", times, PingPongDelay::Time::defaultIndex));
+    }
+    layout.add (std::make_unique<C> (pid (spaceMode), "Delay Mode", juce::StringArray { "Ping-pong", "Stereo" }, 0));
 
     // GRAIN ------------------------------------------------------------------------
     layout.add (std::make_unique<F> (pid (grainMix), "Grains", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent()));
@@ -130,9 +138,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
                                          return juce::String (v < 0 ? "LP " : "HP ") + juce::String (juce::roundToInt (std::abs (v) * 100.0f));
                                      })));
     layout.add (std::make_unique<F> (pid (resonance), "Resonance", juce::NormalisableRange<float> (0.0f, 1.0f), 0.2f, percent()));
-    // DIRT -------------------------------------------------------------------------
-    layout.add (std::make_unique<F> (pid (drive), "Dirt", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent()));
-    layout.add (std::make_unique<C> (pid (dirtMode), "Dirt Mode", juce::StringArray { "Warm", "Fuzz", "Crush" }, 0));
+    // DIST (distortion) ---------------------------------------------------------------
+    layout.add (std::make_unique<F> (pid (drive), "Distortion", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent()));
+    layout.add (std::make_unique<C> (pid (dirtMode), "Distortion Mode", juce::StringArray { "Warm", "Fuzz", "Crush" }, 0));
 
     // WOBBLE -----------------------------------------------------------------------
     layout.add (std::make_unique<F> (pid (wobble), "Wobble", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent()));
@@ -211,7 +219,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
         group->addChild (std::make_unique<C> (id (PadField::mode), label + " Mode", juce::StringArray { "One-shot", "Gate", "Loop" }, 1));
         group->addChild (std::make_unique<F> (id (PadField::fadeIn), label + " Fade In", skewedRange (0.0f, 1000.0f, 60.0f), 1.0f, msText()));
         group->addChild (std::make_unique<F> (id (PadField::fadeOut), label + " Fade Out", skewedRange (0.0f, 2000.0f, 120.0f), 8.0f, msText()));
-        group->addChild (std::make_unique<F> (id (PadField::spaceSend), label + " Echo Send", juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percent()));
+        group->addChild (std::make_unique<F> (id (PadField::spaceSend), label + " Delay Send", juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percent()));
         group->addChild (std::make_unique<F> (id (PadField::grainSend), label + " Grain Amount", juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percent()));
         group->addChild (std::make_unique<F> (id (PadField::decay), label + " Decay", skewedRange (1.0f, 5000.0f, 300.0f), 300.0f, msText()));
         group->addChild (std::make_unique<F> (id (PadField::sustain), label + " Sustain", juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f, percent()));

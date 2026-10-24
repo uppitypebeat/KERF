@@ -103,6 +103,21 @@ public:
         mapped sequentially from the root note. Used by grid/transient/random chopping. */
     bool replaceWithBoundaries (const std::vector<int64_t>& boundaries);
 
+    /** Replaces every chop with chops over `spans` (where there is no span - silence - there
+        is no chop), mapped sequentially from the root note. At most one per key: the last one
+        then reaches over the chops after it, as long as no gap of `maxGap` frames or more
+        (a silence) lies between them. */
+    bool replaceWithSpans (const std::vector<ChopSpan>& spans, int64_t maxGap = 1);
+
+    /** Replaces one chop with chops over `spans` (clamped to it). The first keeps the original
+        id, note and sound settings; the others get new ids and the lowest free notes, and
+        inherit the sound settings. */
+    bool subdivideIntoSpans (int chopId, const std::vector<ChopSpan>& spans);
+
+    /** The chops replaceWithSpans makes of `spans`: in order, not overlapping, none too short,
+        at most `limit` (0: one per key). */
+    std::vector<ChopSpan> cleanSpans (std::vector<ChopSpan> spans, int limit = 0, int64_t maxGap = 1) const;
+
     /** Replaces one chop with sub-chops between `boundaries` (clamped to that chop).
         The first sub-chop keeps the original id, note and sound settings; the others get
         new ids and the lowest free notes, and inherit the sound settings. */

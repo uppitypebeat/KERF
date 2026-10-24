@@ -195,6 +195,7 @@ KerfAudioProcessor::KerfAudioProcessor()
     p.grainDrift = raw (Params::grainDrift);  p.grainShimmer = raw (Params::grainShimmer);
     p.grainShape = raw (Params::grainShape);  p.grainScale = raw (Params::grainScale);
     p.grainFreeze = raw (Params::grainFreeze); p.grainSync = raw (Params::grainSync);
+    p.spaceTime = raw (Params::spaceTime); p.spaceMode = raw (Params::spaceMode);
     p.grainGlide = raw (Params::grainGlide); p.grainDetune = raw (Params::grainDetune); p.grainHaze = raw (Params::grainHaze);
     p.timeSlot = raw (Params::timeSlot); p.timeMix = raw (Params::timeMix); p.timeLength = raw (Params::timeLength);
     p.grainOff = raw (Params::grainOff); p.fxOff = raw (Params::fxOff); p.eqOff = raw (Params::eqOff); p.timeOff = raw (Params::timeOff);
@@ -325,6 +326,11 @@ void KerfAudioProcessor::fillGrainSettings (kerf::GrainSettings& gs, double bpm)
     if (p.grainSync->load() > 0.5f)
         if (auto* density = parameters.getParameter (Params::grainDensity))
             gs.syncBeats = GrainSync::beats[GrainSync::indexFor (density->convertTo0to1 (p.grainDensity->load()))];
+}
+
+PingPongDelay::Settings KerfAudioProcessor::delaySettings (float amount, double tempo) const
+{
+    return PingPongDelay::fromMacro (amount, tempo, (int) p.spaceTime->load(), p.spaceMode->load() < 0.5f);
 }
 
 float KerfAudioProcessor::hazeAmount() const
@@ -557,7 +563,7 @@ void KerfAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int sta
                                                                                            : (sourceBpm > 0.0 ? sourceBpm : 120.0);
     // A tab switched off (double-click) plays as if its effects were at zero (they fade out).
     const auto fxOn = p.fxOff->load() < 0.5f, eqOn = p.eqOff->load() < 0.5f;
-    const auto ss = PingPongDelay::fromMacro (fxOn ? p.space->load() : 0.0f, tempo);
+    const auto ss = delaySettings (fxOn ? p.space->load() : 0.0f, tempo);
     space.process (spaceSend.getReadPointer (0), spaceSend.getReadPointer (1),
                    mixBuffer.getWritePointer (0), mixBuffer.getWritePointer (1), num, ss);
     // --- HAZE: the grains' own reverb -----------------------------------------------
@@ -567,7 +573,7 @@ void KerfAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer, int sta
 
     // --- TONE ---------------------------------------------------------------------
     juce::AudioBuffer<float> view (mixBuffer.getArrayOfWritePointers(), 2, 0, num);
-    // DIRT -> filter -> WOBBLE (so the filter can sweep the distorted sound).
+    // DIST -> filter -> WOBBLE (so the filter can sweep the distorted sound).
     dirt.process (view, num, { fxOn ? p.drive->load() : 0.0f, (DirtProcessor::Mode) (int) p.dirtMode->load() });
     tone.process (view, num, { fxOn ? p.filter->load() : 0.0f, p.resonance->load() });
     eq.process (view, num, eqOn ? eqSettings().heard() : EqProcessor::Settings {});
@@ -1286,7 +1292,7 @@ void KerfAudioProcessor::renderAsync (const juce::File& target, int bitDepth, in
     fillGrainSettings (job->engine.voice.grain, job->bpm);
     job->haze = hazeAmount();
     const auto fxOn = p.fxOff->load() < 0.5f; // tabs switched off render as they sound
-    job->space = PingPongDelay::fromMacro (fxOn ? p.space->load() : 0.0f, job->bpm);
+    job->space = delaySettings (fxOn ? p.space->load() : 0.0f, job->bpm);
     job->tone = { fxOn ? p.filter->load() : 0.0f, p.resonance->load() };
     job->dirt = { fxOn ? p.drive->load() : 0.0f, (DirtProcessor::Mode) (int) p.dirtMode->load() };
     job->wobble = { fxOn ? p.wobble->load() : 0.0f, (WobbleProcessor::Mode) (int) p.wobbleMode->load() };
@@ -1528,9 +1534,12 @@ void KerfAudioProcessor::startAnalysis (SampleData::Ptr sample, bool keepManualB
 
         auto onsets = std::make_shared<OnsetAnalysis> (TransientDetector::analyse (sample->audio, sample->sampleRate, cancelled));
         if (cancelled()) return;
-        const auto tempo = TempoAnalyzer::estimate (*onsets, sample->getNumSamples(), &sample->audio);
+        // What the file name says (sample packs name tempo and key) comes first; the audio finds
+        // the beat grid, and the key when the name has none.
+        const auto tags = readNameTags (sample->name);
+        const auto tempo = TempoAnalyzer::estimate (*onsets, sample->getNumSamples(), &sample->audio, tags);
         if (cancelled()) return;
-        const auto key = KeyAnalyzer::estimate (sample->audio, sample->sampleRate, cancelled);
+        auto key = tags.tonic >= 0 ? KeyEstimate { tags.tonic, tags.minor, 1.0f, true } : KeyAnalyzer::estimate (sample->audio, sample->sampleRate, cancelled);
         if (cancelled()) return;
 
         juce::MessageManager::callAsync ([weak, onsets, tempo, key, generation, keepManualBpm]
@@ -1735,51 +1744,66 @@ int64_t KerfAudioProcessor::regionForChopping (int64_t& start) const
     return end;
 }
 
-void KerfAudioProcessor::replaceChopsUndoable (const std::vector<int64_t>& boundaries, const juce::String& actionName)
+void KerfAudioProcessor::replaceChopsUndoable (const std::vector<ChopSpan>& spans, const juce::String& actionName)
 {
-    if (info.sample == nullptr || boundaries.size() < 2)
+    if (info.sample == nullptr)
         return;
-
-    // The same cuts as already there (APPLY pressed again without a change): nothing to do -
-    // no undo step, no new chops, no animation.
+    if (spans.empty())
     {
-        std::vector<int64_t> existing;
+        setStatusMessage ("Only silence there: nothing to chop");
+        return;
+    }
+
+    const auto selected = (int) settings.getProperty ("selectedChop", 0);
+    const auto chopped = (int) settings.getProperty ("chopScope", 0) == 1 ? chops.getChop (selected) : std::nullopt;
+    // More chops than keys: the last one runs on over short pauses, up to a silence.
+    const auto overSilence = (int64_t) (ChopTools::minGapSeconds * info.sample->sampleRate);
+
+    // The same chops as already there (APPLY pressed again without a change): nothing to do -
+    // no undo step, no new chops, no animation.
+    if (chopped.has_value())
+    {
+        if (spans.size() == 1 && spans.front() == ChopSpan { chopped->start, chopped->end })
+            return;
+    }
+    else
+    {
+        std::vector<ChopSpan> existing;
         for (const auto& c : chops.getChops())
-            for (const auto edge : { c.start, c.end })
-                if (edge >= boundaries.front() && edge <= boundaries.back())
-                    existing.push_back (edge);
-        std::sort (existing.begin(), existing.end());
-        existing.erase (std::unique (existing.begin(), existing.end()), existing.end());
-        auto wanted = boundaries;
-        std::sort (wanted.begin(), wanted.end());
-        wanted.erase (std::unique (wanted.begin(), wanted.end()), wanted.end());
-        // (More cuts than keys: compared as they will be made, see below.)
-        if ((int) settings.getProperty ("chopScope", 0) != 1 && (int) wanted.size() - 1 > chops.chopLimit())
-        {
-            const auto last = wanted.back();
-            wanted.resize ((size_t) chops.chopLimit());
-            wanted.push_back (last);
-        }
-        if (existing == wanted)
+            existing.push_back ({ c.start, c.end });
+        if (existing == chops.cleanSpans (spans, 0, overSilence)) // (as they will be made: more than keys, see below)
             return;
     }
 
     undoManager.beginNewTransaction (actionName);
 
-    const auto selected = (int) settings.getProperty ("selectedChop", 0);
-    bool changed = false;
-
-    if ((int) settings.getProperty ("chopScope", 0) == 1 && chops.getChop (selected))
-        changed = chops.subdivide (selected, boundaries);
-    else
-        changed = chops.replaceWithBoundaries (boundaries);
+    const auto changed = chopped.has_value() ? chops.subdivideIntoSpans (selected, spans) : chops.replaceWithSpans (spans, overSilence);
 
     if (changed && ! chops.getChop (selected))
         settings.setProperty ("selectedChop", chops.getNumChops() > 0 ? chops.getChops().front().id : 0, nullptr);
 
-    // More cuts than keys: say why there are fewer chops.
-    if (changed && (int) boundaries.size() - 1 > chops.getNumChops() && chops.getNumChops() >= chops.chopLimit())
-        setStatusMessage ("At most " + juce::String (chops.chopLimit()) + " chops: one per key from the root up (the last one runs to the end)");
+    if (! changed)
+        return;
+
+    // More cuts than keys: say why there are fewer chops. Gaps: say where the rest went.
+    int64_t covered = 0;
+    for (const auto& s : spans)
+        covered += s.length();
+    const auto start = chopped.has_value() ? chopped->start : 0;
+    const auto end = chopped.has_value() ? chopped->end : info.sample->getNumSamples();
+    if ((int) spans.size() > chops.getNumChops() && chops.getNumChops() >= chops.chopLimit())
+        setStatusMessage ("At most " + juce::String (chops.chopLimit()) + " chops: one per key from the root up");
+    else if (covered < end - start)
+        setStatusMessage ("Silence left out: no chop where the sample is quiet");
+}
+
+std::vector<ChopSpan> KerfAudioProcessor::chopsOnTheSound (std::vector<int64_t> cuts, double snapStep) const
+{
+    if (info.onsets == nullptr)
+        return ChopTools::spansBetween (cuts); // (not analysed yet)
+    if (snapStep > 0.0)
+        cuts = ChopTools::snapToHits (cuts, *info.onsets, std::min ((int64_t) (0.035 * info.onsets->sampleRate), (int64_t) (0.2 * snapStep)));
+    return ChopTools::leaveOutSilence (cuts, *info.onsets, true);
 }
 
 void KerfAudioProcessor::chopByGrid (NoteValue value, NoteModifier modifier)
@@ -1788,10 +1812,10 @@ void KerfAudioProcessor::chopByGrid (NoteValue value, NoteModifier modifier)
     int64_t start; const auto end = regionForChopping (start);
     const auto bpm = info.sourceBpm > 0.0 ? info.sourceBpm : getEffectiveTempo();
     // The whole sample with SHIFT: on the beat lines' grid (the chop scope: from the chop's start).
-    if (const auto origin = chops.getBeatOrigin(); origin != 0.0 && start == 0)
-        replaceChopsUndoable (ChopTools::byBeats (bpm, info.sample->sampleRate, start, end, gridStepBeats (value, modifier), origin), "Grid chop");
-    else
-        replaceChopsUndoable (rhythmicGrid (start, end, bpm, info.sample->sampleRate, value, modifier), "Grid chop");
+    const auto origin = chops.getBeatOrigin();
+    const auto cuts = origin != 0.0 && start == 0 ? ChopTools::byBeats (bpm, info.sample->sampleRate, start, end, gridStepBeats (value, modifier), origin)
+                                                  : rhythmicGrid (start, end, bpm, info.sample->sampleRate, value, modifier);
+    replaceChopsUndoable (chopsOnTheSound (cuts, gridStepSamples (value, modifier, bpm, info.sample->sampleRate)), "Grid chop");
 }
 
 void KerfAudioProcessor::deleteAllChops()
@@ -1968,14 +1992,15 @@ void KerfAudioProcessor::chopEqual (int count)
 {
     if (info.sample == nullptr) return;
     int64_t start; const auto end = regionForChopping (start);
-    replaceChopsUndoable (equalSlices (start, end, count), "Equal slices");
+    replaceChopsUndoable (ChopTools::equal (info.onsets.get(), start, end, count), "Equal slices");
 }
 
 void KerfAudioProcessor::chopByTransients (float sensitivity, double minDistanceSeconds)
 {
     if (info.sample == nullptr || info.onsets == nullptr) return;
     int64_t start; const auto end = regionForChopping (start);
-    replaceChopsUndoable (ChopTools::byTransients (*info.onsets, start, end, sensitivity, minDistanceSeconds, chops.chopLimit()), "Transient chop");
+    replaceChopsUndoable (chopsOnTheSound (ChopTools::byTransients (*info.onsets, start, end, sensitivity, minDistanceSeconds, chops.chopLimit()), 0.0),
+                          "Transient chop");
 }
 
 void KerfAudioProcessor::chopByBeats (double beatsPerChop)
@@ -1985,14 +2010,16 @@ void KerfAudioProcessor::chopByBeats (double beatsPerChop)
     // The BPM shown in the header (yours or the detected one), on the beat lines of the waveform.
     const auto bpm = info.sourceBpm > 0.0 ? info.sourceBpm : info.tempo.bpm;
     if (bpm <= 0.0) return;
-    replaceChopsUndoable (ChopTools::byBeats (bpm, info.sample->sampleRate, start, end, beatsPerChop, chops.getBeatOrigin()), "Beat chop");
+    replaceChopsUndoable (chopsOnTheSound (ChopTools::byBeats (bpm, info.sample->sampleRate, start, end, beatsPerChop, chops.getBeatOrigin()),
+                                          60.0 / bpm * beatsPerChop * info.sample->sampleRate),
+                          "Beat chop");
 }
 
 void KerfAudioProcessor::chopRandom (int count, uint32_t seed)
 {
     if (info.sample == nullptr) return;
     int64_t start; const auto end = regionForChopping (start);
-    replaceChopsUndoable (ChopTools::random (start, end, count, seed, 0.35f, info.onsets.get(), info.sample->sampleRate), "Random chop");
+    replaceChopsUndoable (ChopTools::random (info.onsets.get(), start, end, count, seed), "Random chop");
 }
 
 void KerfAudioProcessor::chopSmart (int targetCount)
@@ -2002,6 +2029,7 @@ void KerfAudioProcessor::chopSmart (int targetCount)
     ChopTools::RuleBasedSuggester suggester;
     auto tempo = info.tempo;
     if (info.sourceBpm > 0.0) tempo.bpm = info.sourceBpm;
+    if (const auto origin = chops.getBeatOrigin(); origin != 0.0) tempo.firstBeat = (int64_t) std::llround (origin); // SHIFT: the beat lines the user set
     replaceChopsUndoable (suggester.suggest (info.sample->audio, info.sample->sampleRate, *info.onsets, tempo, start, end, targetCount),
                           "Smart chop");
 }
@@ -3055,26 +3083,35 @@ void KerfAudioProcessor::loadFactoryPreset (int index)
 
 void KerfAudioProcessor::stepPreset (int direction)
 {
-    // Menu order: Default, the factory presets, then your own (sorted by name).
+    // Menu order: Random, Default, the factory presets, then your own (sorted by name).
     const auto& factory = Factory::presets();
     auto files = getPresetFolder().findChildFiles (juce::File::findFiles, false, juce::String ("*") + presetExtension);
     files.sort();
-    const auto total = 1 + (int) factory.size() + files.size();
+    const auto total = 2 + (int) factory.size() + files.size();
 
     const auto current = getPresetName();
-    int index = current == "Default" ? 0 : -1;
+    int index = current == "Random" ? 0 : (current == "Default" ? 1 : -1);
     for (size_t i = 0; i < factory.size() && index < 0; ++i)
-        if (current == factory[i].name) index = 1 + (int) i;
+        if (current == factory[i].name) index = 2 + (int) i;
     for (int i = 0; i < files.size() && index < 0; ++i)
-        if (current == files[i].getFileNameWithoutExtension()) index = 1 + (int) factory.size() + i;
+        if (current == files[i].getFileNameWithoutExtension()) index = 2 + (int) factory.size() + i;
 
-    const auto next = index < 0 ? (direction > 0 ? 1 : total - 1) : (index + (direction > 0 ? 1 : -1) + total) % total;
+    const auto next = index < 0 ? (direction > 0 ? 2 : total - 1) : (index + (direction > 0 ? 1 : -1) + total) % total;
     if (next == 0)
+        randomPreset();
+    else if (next == 1)
         initPreset();
-    else if (next <= (int) factory.size())
-        loadFactoryPreset (next - 1);
+    else if (next <= 1 + (int) factory.size())
+        loadFactoryPreset (next - 2);
     else
-        loadPreset (files[next - 1 - (int) factory.size()]);
+        loadPreset (files[next - 2 - (int) factory.size()]);
+}
+
+void KerfAudioProcessor::randomPreset()
+{
+    juce::String rolled;
+    applyPreset (Factory::randomSound ((uint32_t) juce::Random::getSystemRandom().nextInt(), rolled), "Random", "Random preset", Factory::inScope);
+    setStatusMessage ("Random: " + rolled + " (click Random again for another)");
 }
 
 void KerfAudioProcessor::initPreset()

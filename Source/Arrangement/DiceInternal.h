@@ -35,11 +35,17 @@ enum StyleIndex { boomBap, trap, drill, house, drumAndBass, breakStutter, jersey
 
 const std::vector<Style>& styles();
 bool isDrumStyle (int style);
-int pickStyle (double bpm, bool drums, bool tonal, bool slices, int avoid, juce::Random& rng);
+int pickStyle (double bpm, bool drums, bool tonal, bool slices, bool placed, int avoid, juce::Random& rng);
 /** A genre bar changed a little: ghost notes come and go, a hat becomes a roll or triplets... */
 std::string varyBar (std::string bar, juce::Random& rng, float amount);
-/** CHOP UP: the slices in their order and length at the tempo, re-arranged more with every bar. */
-std::vector<PatternEvent> chopUpBars (const std::vector<ChopTraits>& chops, int bars, double bpm, juce::Random& rng);
+/** CHOP UP: the loop's own groove - every chop on the step where it sits in the sample - then
+    flipped, more with every bar: chops swap places, stutter, a beat repeats or runs backwards,
+    a hit drops out, a beat comes from another bar. Without a tempo (or places): the slices in
+    their order and length, re-arranged the same way. */
+std::vector<PatternEvent> chopUpBars (const std::vector<ChopTraits>& chops, int bars, double bpm, double originSeconds, juce::Random& rng);
+/** Where the chops sit in the loop: (index into chops, step from the grid's start), by step,
+    one per step. Empty without a tempo, or when they do not lie in time (all at the start). */
+std::vector<std::pair<size_t, int>> placesInLoop (const std::vector<ChopTraits>& chops, double bpm, double originSeconds);
 
 //==============================================================================
 // Notes in the key: every shift (-12..+12) that puts a chop's own pitch on the scale.

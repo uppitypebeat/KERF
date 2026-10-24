@@ -1,4 +1,5 @@
 #include "PatternModel.h"
+#include <algorithm>
 
 namespace kerf
 {
@@ -6,7 +7,8 @@ namespace kerf
 const juce::Identifier PatternModel::PATTERN ("PATTERN"), PatternModel::EVENT ("EVENT"), PatternModel::bars ("bars"),
                        PatternModel::step ("step"), PatternModel::length ("length"), PatternModel::chop ("chop"),
                        PatternModel::velocity ("velocity"), PatternModel::pitch ("pitch"), PatternModel::chance ("chance"),
-                       PatternModel::repeats ("repeats"), PatternModel::random ("random"), PatternModel::slide ("slide");
+                       PatternModel::repeats ("repeats"), PatternModel::random ("random"), PatternModel::slide ("slide"),
+                       PatternModel::locks ("locks");
 
 PatternModel::PatternModel (juce::UndoManager* undo) : undoManager (undo)
 {
@@ -226,6 +228,45 @@ void PatternModel::restoreEvent (const juce::ValueTree& event)
 void PatternModel::clear()
 {
     state.removeAllChildren (undoManager);
+}
+
+std::vector<int> PatternModel::getLocks() const
+{
+    std::vector<int> out;
+    const auto steps = getNumSteps();
+    for (const auto& token : juce::StringArray::fromTokens (state.getProperty (locks).toString(), ",", {}))
+        if (const auto s = token.getIntValue(); token.isNotEmpty() && s >= 0 && s < steps)
+            out.push_back (s);
+    std::sort (out.begin(), out.end());
+    out.erase (std::unique (out.begin(), out.end()), out.end());
+    return out;
+}
+
+bool PatternModel::isLocked (int stepIndex) const
+{
+    const auto all = getLocks();
+    return std::binary_search (all.begin(), all.end(), stepIndex);
+}
+
+void PatternModel::setLocked (int stepIndex, bool locked)
+{
+    auto all = getLocks();
+    const auto it = std::lower_bound (all.begin(), all.end(), stepIndex);
+    const auto has = it != all.end() && *it == stepIndex;
+    if (locked == has)
+        return;
+    if (locked) all.insert (it, stepIndex);
+    else        all.erase (it);
+    juce::StringArray tokens;
+    for (const auto s : all)
+        tokens.add (juce::String (s));
+    if (tokens.isEmpty()) state.removeProperty (locks, undoManager);
+    else                  state.setProperty (locks, tokens.joinIntoString (","), undoManager);
+}
+
+void PatternModel::clearLocks()
+{
+    state.removeProperty (locks, undoManager);
 }
 
 void PatternModel::removeEventsForMissingChops (const std::vector<int>& existing)

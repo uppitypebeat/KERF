@@ -10,7 +10,7 @@ namespace kerf::ui
 /** The lower control area, one page per main window (the tabs are PageTabs, at the top):
       CHOP:  SAMPLE | ENVELOPE | PITCH | OUTPUT      (the selected chop)
       GRAIN: CLOUD | MOTION | PITCH | COLOUR
-      FX:    ECHO | DIRT | WOBBLE | FILTER | PUMP    (global effects)
+      FX:    DELAY | DISTORTION | WOBBLE | FILTER | PUMP   (global effects)
       EQ:    no panel: the EQ view is edited directly (drag, wheel, right-click)
     Every control is visible on its page (no hidden drawer). Sections are sized to their
     content and the spare width is shared evenly, so nothing floats in empty space. */
@@ -79,6 +79,8 @@ private:
     void attachChoice (Segmented& s, const char* paramId);
     void applyChopValue (const ChopBinding& b, double value);
     void syncFromModel();
+    /** GRAINS at 0 %: every other GRANULIZER control greyed out and locked (they do nothing then). */
+    void updateGrainControls();
     juce::String chopTag() const;
     void rebindPads();
 
@@ -113,7 +115,9 @@ private:
     juce::Rectangle<float> chokeLabel;
 
     // SPACE
-    Knob space { "Echo", Knob::Size::hero };
+    Knob space { "Delay", Knob::Size::hero };
+    Segmented spaceTime { { "1/16", "1/8T", "1/8", "1/8D", "1/4T", "1/4", "1/4D", "1/2" } }; // PingPongDelay::Time
+    Segmented spaceMode { { "PING-PONG", "STEREO" } };
     Knob spaceSend { "Send", Knob::Size::small };
 
     // GRAIN (its own page and view)
@@ -127,7 +131,7 @@ private:
 
 
     // DIRT, WOBBLE
-    Knob dirt { "Dirt", Knob::Size::hero };
+    Knob dirt { "Distortion", Knob::Size::hero };
     Segmented dirtMode { { "WARM", "FUZZ", "CRUSH" } };
     Knob wobble { "Wobble", Knob::Size::hero };
     Segmented wobbleMode { { "TAPE", "CHORUS" } };
@@ -135,7 +139,7 @@ private:
     Segmented pumpMode { { "1/4", "1/8", "1/16" } };
 
     // TONE
-    Knob filter { "Filter", Knob::Size::hero, true }, resonance { "Res", Knob::Size::hero };
+    Knob filter { "Filter", Knob::Size::hero, true }, resonance { "Res", Knob::Size::small };
 
     // TIME
     TimeSlots timeSlots;

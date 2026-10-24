@@ -219,7 +219,7 @@ void MainView::updateChopRowVisibility()
         : page == 1 || page == 2
         ? knobHints
         : showSeq
-        ? "Drag up / down: velocity  \xc2\xb7  Wheel: pitch  \xc2\xb7  Right-click: repeat, chance  \xc2\xb7  Drag right: length"
+        ? "Drag up / down: velocity  \xc2\xb7  Wheel: pitch  \xc2\xb7  Right-click: repeat, chance, lock  \xc2\xb7  Alt + click: lock  \xc2\xb7  Drag right: length"
         : "Double-click: split  \xc2\xb7  Ctrl + drag: select chops  \xc2\xb7  Drag a pad out: audio (Ctrl: MIDI)  \xc2\xb7  Space: play / stop  \xc2\xb7  Shift: no snap"));
 }
 

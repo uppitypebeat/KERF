@@ -111,6 +111,7 @@ private:
     IconButton dice { "Random pattern", IconButton::Icon::dice, false }; // a new pattern, as long as the bars set
     int diceStyle = -1;     // a style picked on the die's menu (-1: one that suits the tempo)
     int lastDiceStyle = -1; // the last roll's (the next one takes another)
+    int lastAutoMode = -1;  // MODE Auto: the last roll's mode (the next one takes another)
     std::deque<juce::int64> recentRolls; // fingerprints of the last rolls (never the same twice)
     std::deque<std::vector<PatternEvent>> recentPatterns; // the last few rolls: a new one must differ
     PatternDice::TraitCache diceTraits;  // each chop listened to once

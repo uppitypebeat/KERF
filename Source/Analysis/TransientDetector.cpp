@@ -43,7 +43,7 @@ namespace
     std::vector<Band> makeFilterbank (int fftSize, double sampleRate)
     {
         const auto binHz = sampleRate / fftSize;
-        const auto top = std::min (16000.0, sampleRate * 0.45);
+        const auto top = std::min (16000.0, sampleRate * 0.95);
         std::vector<int> centres;
         for (auto f = 30.0; f < top; f *= std::pow (2.0, 1.0 / bandsPerOctave))
         {
@@ -113,12 +113,15 @@ namespace
         if (best < 0)
             return juce::jlimit<int64_t> (0, n - 1, rough);
 
-        // Back to the start: the last moment before the rise that was still near the floor
-        // of the 12 ms before it (the floor, not a ripple: a bass wave is longer than the
-        // envelope window).
+        // Back to the start: the last moment before the rise that was still at the level of
+        // the 12 ms before it (its middle level: a noisy background - a room, the tail of the
+        // hit before - is the floor, not its quietest dip; nor is a ripple: a bass wave is
+        // longer than the envelope window).
         const auto back = std::max (1, (int) (0.012 * sampleRate / (double) step));
         const auto from = std::max (0, best - back);
-        const auto floorLevel = *std::min_element (env.begin() + from, env.begin() + best + span);
+        std::vector<float> before (env.begin() + from, env.begin() + best + 1);
+        std::nth_element (before.begin(), before.begin() + (ptrdiff_t) before.size() / 2, before.end());
+        const auto floorLevel = before[before.size() / 2];
         auto i = best;
         while (i > from && env[(size_t) i] > floorLevel + 1.5f)
             --i;
@@ -249,6 +252,99 @@ namespace
     }
 }
 
+std::vector<Silence> findSilences (const juce::AudioBuffer<float>& audio, double sampleRate)
+{
+    const auto n = (int64_t) audio.getNumSamples();
+    const auto chans = audio.getNumChannels();
+    if (n <= 0 || chans <= 0 || sampleRate <= 0.0)
+        return {};
+
+    // The level every 2.5 ms (RMS of all channels over 10 ms round it), in dB.
+    const auto hop = std::max<int64_t> (16, (int64_t) std::round (sampleRate * 0.0025));
+    const auto numHops = (size_t) ((n + hop - 1) / hop);
+    std::vector<double> power (numHops, 0.0);
+    for (int ch = 0; ch < chans; ++ch)
+    {
+        const auto* d = audio.getReadPointer (ch);
+        for (int64_t i = 0; i < n; ++i)
+            power[(size_t) (i / hop)] += (double) d[i] * d[i];
+    }
+    std::vector<float> level (numHops);
+    for (size_t h = 0; h < numHops; ++h)
+    {
+        double sum = 0.0;
+        int64_t count = 0;
+        for (auto k = h > 0 ? h - 1 : 0; k <= std::min (numHops - 1, h + 2); ++k)
+        {
+            sum += power[k];
+            count += std::min (hop, n - (int64_t) k * hop) * chans;
+        }
+        level[h] = (float) (10.0 * std::log10 (sum / (double) std::max<int64_t> (1, count) + 1.0e-20));
+    }
+
+    // Silent: 50 dB under the loud parts (their 99th percentile), or just above a noise floor
+    // (the quietest 3 %) when there is one - but never within 36 dB of the loud parts (a
+    // quiet passage of music is not silence).
+    auto sorted = level;
+    std::sort (sorted.begin(), sorted.end());
+    const auto loud = sorted[(size_t) ((double) (numHops - 1) * 0.99)];
+    const auto floor = sorted[(size_t) ((double) (numHops - 1) * 0.03)];
+    if (loud < -90.0f)
+        return {}; // nothing to hear anywhere
+    const auto threshold = juce::jlimit (loud - 50.0f, loud - 36.0f, floor + 100.0f);
+
+    std::vector<bool> sound (numHops);
+    for (size_t h = 0; h < numHops; ++h)
+        sound[h] = level[h] >= threshold;
+
+    // The sounds (runs of loud hops), their edges found on the samples themselves.
+    const auto amplitude = std::pow (10.0f, threshold / 20.0f);
+    auto peakAt = [&] (int64_t i)
+    {
+        float p = 0.0f;
+        for (int ch = 0; ch < chans; ++ch)
+            p = std::max (p, std::abs (audio.getSample (ch, (int) i)));
+        return p;
+    };
+    const auto pre = (int64_t) (0.0015 * sampleRate), tail = (int64_t) (0.01 * sampleRate);
+    const auto pop = (int64_t) (0.012 * sampleRate);
+    std::vector<Silence> sounds;
+    for (size_t h = 0; h < numHops;)
+    {
+        if (! sound[h]) { ++h; continue; }
+        auto e = h;
+        while (e < numHops && sound[e])
+            ++e;
+        const auto from = std::max<int64_t> (0, ((int64_t) h - 1) * hop), to = std::min (n, ((int64_t) e + 3) * hop);
+        auto first = from, last = to - 1;
+        while (first < to && peakAt (first) < amplitude) ++first;
+        while (last > first && peakAt (last) < amplitude) --last;
+        if (first < to && last - first >= pop)
+        {
+            const auto start = std::max<int64_t> (0, first - pre), end = std::min (n, last + 1 + tail);
+            if (! sounds.empty() && start <= sounds.back().end)
+                sounds.back().end = std::max (sounds.back().end, end);
+            else
+                sounds.push_back ({ start, end });
+        }
+        h = e;
+    }
+
+    // The silences: what lies between them, at least 10 ms.
+    const auto minLength = (int64_t) (0.01 * sampleRate);
+    std::vector<Silence> silences;
+    int64_t at = 0;
+    for (const auto& s : sounds)
+    {
+        if (s.start - at >= minLength)
+            silences.push_back ({ at, s.start });
+        at = s.end;
+    }
+    if (n - at >= minLength)
+        silences.push_back ({ at, n });
+    return silences;
+}
+
 OnsetAnalysis analyse (const juce::AudioBuffer<float>& audio, double sampleRate, const std::function<bool()>& shouldExit)
 {
     OnsetAnalysis result;
@@ -308,6 +404,7 @@ OnsetAnalysis analyse (const juce::AudioBuffer<float>& audio, double sampleRate,
     result.onsets = detectOnsets (mono, sampleRate, shouldExit, cancelled);
     if (cancelled)
         return {};
+    result.silences = findSilences (audio, sampleRate);
     return result;
 }
 

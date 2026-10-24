@@ -21,7 +21,119 @@ juce::String KeyEstimate::toString() const
 }
 
 //==============================================================================
-TempoEstimate TempoAnalyzer::estimate (const OnsetAnalysis& a, int64_t numFrames, const juce::AudioBuffer<float>* audio)
+NameTags readNameTags (const juce::String& fileName)
+{
+    NameTags tags;
+    auto name = fileName.replace (juce::CharPointer_UTF8 ("\xe2\x99\xaf"), "#").replace (juce::CharPointer_UTF8 ("\xe2\x99\xad"), "b");
+    for (const auto* extension : { ".wav", ".wave", ".aif", ".aiff", ".flac", ".ogg", ".mp3" })
+        if (name.endsWithIgnoreCase (extension))
+            name = name.dropLastCharacters ((int) std::strlen (extension));
+
+    // Words: runs of letters or of digits (and '#': C#), with what stands before and after them.
+    struct Word { juce::String text; juce::juce_wchar before = 0, after = 0; };
+    std::vector<Word> words;
+    auto isWordChar = [] (juce::juce_wchar c) { return (c < 128 && juce::CharacterFunctions::isLetterOrDigit (c)) || c == '#'; };
+    for (int i = 0; i < name.length();)
+    {
+        if (! isWordChar (name[i]))
+        {
+            ++i;
+            continue;
+        }
+        const auto start = i;
+        const auto digits = juce::CharacterFunctions::isDigit (name[i]); // "125bpm": two words
+        while (i < name.length() && isWordChar (name[i]) && juce::CharacterFunctions::isDigit (name[i]) == digits)
+            ++i;
+        words.push_back ({ name.substring (start, i), start > 0 ? name[start - 1] : 0, i < name.length() ? name[i] : 0 });
+    }
+
+    // The key: "Gmin", "A#min", "Ebm", "F#minor", or "F" + "Min" / "minor" / "m".
+    auto noteOf = [] (const juce::String& text, int& length)
+    {
+        length = 0;
+        if (text.isEmpty() || text[0] < 'A' || text[0] > 'G')
+            return -1;
+        static const int natural[] = { 9, 11, 0, 2, 4, 5, 7 }; // A B C D E F G
+        auto pc = natural[text[0] - 'A'];
+        length = 1;
+        if (text.length() > 1 && text[1] == '#') { ++pc; length = 2; }
+        else if (text.length() > 1 && text[1] == 'b') { --pc; length = 2; }
+        return (pc + 12) % 12;
+    };
+    auto modeOf = [] (const juce::String& text)
+    {
+        if (text.equalsIgnoreCase ("min") || text.equalsIgnoreCase ("minor") || text == "m" || text.equalsIgnoreCase ("moll"))
+            return 1;
+        if (text.equalsIgnoreCase ("maj") || text.equalsIgnoreCase ("major") || text.equalsIgnoreCase ("dur"))
+            return 0;
+        return -1;
+    };
+    int keyWord = -1, keyLength = 1; // "F" "Min": two words
+    bool keyWasBareM = false;
+    for (int w = 0; w < (int) words.size(); ++w)
+    {
+        int length = 0;
+        const auto& text = words[(size_t) w].text;
+        const auto pc = noteOf (text, length);
+        if (pc < 0)
+            continue;
+        const auto rest = text.substring (length);
+        auto mode = rest.isNotEmpty() ? modeOf (rest) : -1;
+        if (rest.isEmpty() && w + 1 < (int) words.size())
+            mode = modeOf (words[(size_t) w + 1].text);
+        // "Am" alone could be a word ("I Am"): a key only among the tags ("Am 90", "140bpm F#m")
+        // and when nothing better is named.
+        const auto bareM = rest == "m";
+        auto isTag = [&words] (int at)
+        {
+            return at >= 0 && at < (int) words.size()
+                && (words[(size_t) at].text.containsOnly ("0123456789") || words[(size_t) at].text.equalsIgnoreCase ("bpm") || words[(size_t) at].text.equalsIgnoreCase ("key"));
+        };
+        if (mode < 0 || (bareM && ((keyWord >= 0 && ! keyWasBareM) || ! (isTag (w - 1) || isTag (w + 1)))))
+            continue;
+        tags.tonic = pc;
+        tags.minor = mode == 1;
+        keyWord = w;
+        keyLength = rest.isEmpty() ? 2 : 1;
+        keyWasBareM = bareM;
+    }
+
+    // The tempo: "125bpm" / "bpm 125" first, then "(90)", then a number next to the key,
+    // then the plain numbers from 60 to 200, the last first (not "Vol.3", "v2", "No. 096").
+    std::vector<std::pair<int, double>> found; // rank, bpm
+    const auto numberAfterKey = keyWord >= 0 && keyWord + keyLength < (int) words.size()
+                                && words[(size_t) (keyWord + keyLength)].text.containsOnly ("0123456789");
+    for (int w = 0; w < (int) words.size(); ++w)
+    {
+        const auto& word = words[(size_t) w];
+        if (! word.text.containsOnly ("0123456789") || word.text.length() > 3 || word.text[0] == '0')
+            continue;
+        const auto value = word.text.getIntValue();
+        if (value < 60 || value > 200 || word.before == '.' || word.after == '.')
+            continue;
+        const auto previous = w > 0 ? words[(size_t) w - 1].text.toLowerCase() : juce::String();
+        if (previous == "v" || previous == "vol" || previous == "no" || previous == "nr" || previous == "take" || previous == "part")
+            continue;
+        const auto next = w + 1 < (int) words.size() ? words[(size_t) w + 1].text.toLowerCase() : juce::String();
+        int rank = 1000 - w; // the plain numbers: the last first
+        if (next == "bpm" || previous == "bpm")
+            rank = 0;
+        else if (word.before == '(' && word.after == ')')
+            rank = 1;
+        else if (keyWord >= 0 && (w == keyWord + keyLength || (w == keyWord - 1 && ! numberAfterKey)))
+            rank = 2; // next to the key (with numbers on both sides, the one after it: the one before is an index)
+        found.push_back ({ rank, (double) value });
+    }
+    std::sort (found.begin(), found.end());
+    for (const auto& f : found)
+        tags.tempos.push_back (f.second);
+    tags.sure = (int) std::count_if (found.begin(), found.end(), [] (const std::pair<int, double>& f) { return f.first <= 2; });
+    return tags;
+}
+
+//==============================================================================
+TempoEstimate TempoAnalyzer::estimate (const OnsetAnalysis& a, int64_t numFrames, const juce::AudioBuffer<float>* audio,
+                                       const NameTags& named)
 {
     // 1. Coarse tempo: autocorrelation of the onset detection function (ODF) at one, two
     //    and four beats, with a broad preference for common tempos.
@@ -44,8 +156,17 @@ TempoEstimate TempoAnalyzer::estimate (const OnsetAnalysis& a, int64_t numFrames
     const auto& odf = odfStore;
     const auto fps = a.odfFrameRate();
 
-    if (odf.size() < 64 || fps <= 0.0)
+    auto namedOnly = [&named, &result]
+    {
+        if (named.sure != 1)
+            return result; // (one marked tempo: that one; of several, the audio would have to decide)
+        result.bpm = named.tempos.front();
+        result.fromName = true;
+        result.confidence = 1.0f;
         return result;
+    };
+    if (odf.size() < 64 || fps <= 0.0)
+        return namedOnly();
 
     const auto size = odf.size();
 
@@ -154,7 +275,7 @@ TempoEstimate TempoAnalyzer::estimate (const OnsetAnalysis& a, int64_t numFrames
     }
 
     if (bestScore <= 0.0f)
-        return result;
+        return namedOnly();
 
     // Confidence from how much the best peak stands out.
     const auto scoreMean = std::accumulate (scores.begin(), scores.end(), 0.0f) / (float) scores.size();
@@ -240,6 +361,34 @@ TempoEstimate TempoAnalyzer::estimate (const OnsetAnalysis& a, int64_t numFrames
         }
     }
 
+    // Exact loops: a sample exported as a whole number of beats at a whole (or half) BPM is
+    // that long to the sample - rare by chance. When the rhythm did not match one of the
+    // loop's tempos (pads, a sparse bass, an unsure grid), the exact tempo whose beat grid
+    // fits best (the usual tempos, around 110, a little ahead) decides, unless the grid
+    // clearly fits the measured tempo better.
+    auto prior = [] (double b) { return std::exp (-0.5 * std::pow (std::log2 (b / 110.0) / 0.6, 2.0)); };
+    if (loopBpm <= 0.0)
+    {
+        const auto seconds = (double) numFrames / a.sampleRate;
+        double ignored = 0.0, exactScore = 0.0, exactBpm = 0.0;
+        for (int beats : { 4, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256 })
+        {
+            const auto whole = std::round (beats * 60.0 / seconds * 2.0) / 2.0; // a whole or half BPM
+            if (whole < 60.0 || whole > 200.0)
+                continue;
+            if (std::abs (beats * 60.0 / whole * a.sampleRate - (double) numFrames) > std::max (2.0, 0.0005 * a.sampleRate))
+                continue;
+            const auto score = (fitGrid (fps * 60.0 / whole, ignored) + 1.0e-6) * prior (whole) * (whole == std::round (whole) ? 1.0 : 0.6);
+            if (score > exactScore)
+            {
+                exactScore = score;
+                exactBpm = whole;
+            }
+        }
+        if (exactBpm > 0.0 && fitGrid (fps * 60.0 / exactBpm, ignored) >= 0.5 * fitGrid (fps * 60.0 / bpm, ignored))
+            loopBpm = exactBpm;
+    }
+
     if (loopBpm > 0.0)
     {
         bpm = loopBpm;
@@ -264,6 +413,15 @@ TempoEstimate TempoAnalyzer::estimate (const OnsetAnalysis& a, int64_t numFrames
             target = bpm * 0.5;
         else if (bpm < 62.0 || (bpm < 90.0 && sixteenths > 0.45 * onBeat))
             target = bpm * 2.0;
+        else if (bpm < 80.0)
+        {
+            // Slow, with little between the beats: these "beats" may be the half notes of
+            // twice the tempo (a sparse bass at 125 read as 62.5). The grid that fits better,
+            // with the usual tempos ahead, decides.
+            double ignored = 0.0;
+            if (fitGrid (period * 0.5, ignored) * prior (bpm * 2.0) > onBeat * prior (bpm))
+                target = bpm * 2.0;
+        }
 
         if (target != bpm)
         {
@@ -272,6 +430,53 @@ TempoEstimate TempoAnalyzer::estimate (const OnsetAnalysis& a, int64_t numFrames
             bpm = exact > 0.0 ? exact : refine (target, 0.01, phase);
             result.fromLoopLength = exact > 0.0;
         }
+    }
+
+    // --- The file name ---------------------------------------------------------------------
+    // It names the tempo the loop was made at. A tempo marked as one ("128bpm", "(90)", next
+    // to the key) is the answer; of several such (an index next to the key, too), the one
+    // the loop's length (a whole number of beats) and the measured tempo agree with, the usual
+    // tempos a little ahead. A bare number only when the measured tempo or the loop's length
+    // agrees: a one-shot's index is no tempo.
+    const auto& tempos = named.tempos;
+    auto agreement = [&] (double candidate) // 2: the measured tempo, 1: double or half of it, 0: neither
+    {
+        if (std::abs (candidate / bpm - 1.0) < 0.03)
+            return 2;
+        return std::abs (candidate * 2.0 / bpm - 1.0) < 0.03 || std::abs (candidate * 0.5 / bpm - 1.0) < 0.03 ? 1 : 0;
+    };
+    auto fitsLength = [&] (double candidate)
+    {
+        const auto beats = (double) numFrames / a.sampleRate * candidate / 60.0;
+        return beats >= 3.5 && std::abs (beats - std::round (beats)) < 0.02;
+    };
+    double chosen = 0.0;
+    if (named.sure > 0)
+    {
+        double best = -1.0;
+        for (int i = 0; i < named.sure; ++i)
+        {
+            const auto t = tempos[(size_t) i];
+            const auto score = (fitsLength (t) ? 2.0 : 0.0) + agreement (t) + prior (t) - 0.01 * i;
+            if (score > best)
+            {
+                best = score;
+                chosen = t;
+            }
+        }
+    }
+    else
+    {
+        for (const auto& t : tempos)
+            if (chosen == 0.0 && (agreement (t) > 0 || fitsLength (t)))
+                chosen = t;
+    }
+    if (chosen > 0.0)
+    {
+        bpm = chosen;
+        result.fromName = true;
+        result.fromLoopLength = false;
+        result.confidence = 1.0f;
     }
 
     // --- 5. Whole tempos --------------------------------------------------------------------
@@ -526,7 +731,12 @@ KeyEstimate KeyAnalyzer::estimate (const juce::AudioBuffer<float>& audio, double
 
     // A key's score: how well the notes fit its profile, plus (half as much) how well the
     // bass fits a bass line in that key (mostly on the tonic, then the fifth and fourth).
-    constexpr double bassScoreWeight = 0.5;
+    // The flatter the notes (noisy, distorted, atonal stabs), the more the bass decides.
+    double spread = 0.0;
+    for (const auto v : chroma)
+        spread += (v - 1.0 / 12.0) * (v - 1.0 / 12.0);
+    spread = std::sqrt (spread / 12.0);
+    const auto bassScoreWeight = 0.5 * juce::jlimit (1.0, 3.0, 0.04 / std::max (1.0e-4, spread));
     double best = -2.0, second = -2.0, bestNotes = 0.0;
     for (int tonic = 0; tonic < 12; ++tonic)
         for (int isMinor = 0; isMinor < 2; ++isMinor)
@@ -546,6 +756,18 @@ KeyEstimate KeyAnalyzer::estimate (const juce::AudioBuffer<float>& audio, double
                 second = r;
             }
         }
+
+    // Major or minor: without a clear major third, minor (a bare root and fifth - a techno
+    // bass, a power chord - is heard as minor in most of the music made with samples).
+    auto noMajorThird = [&chroma] (int tonic)
+    {
+        return chroma[(size_t) ((tonic + 4) % 12)] < std::max (0.06, 1.5 * chroma[(size_t) ((tonic + 3) % 12)]);
+    };
+    if (result.tonic >= 0 && ! result.minor && noMajorThird (result.tonic))
+    {
+        result.minor = true;
+        bestNotes = pearson (chroma, minorProfile, result.tonic);
+    }
 
     // Confidence: a clear winner whose notes fit its key well.
     result.confidence = (float) juce::jlimit (0.0, 1.0, (best - second) * 4.0 * juce::jlimit (0.0, 1.0, (bestNotes - 0.3) / 0.5));

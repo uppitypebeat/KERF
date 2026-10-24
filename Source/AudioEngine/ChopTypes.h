@@ -48,6 +48,15 @@ struct ChopParams
     int64_t length() const noexcept { return end - start; }
 };
 
+/** Where a chop sits in the sample, [start, end) in frames: what the chop tools hand the chop
+    model (with gaps between them where the sample is silent). */
+struct ChopSpan
+{
+    int64_t start = 0, end = 0;
+    int64_t length() const noexcept { return end - start; }
+    bool operator== (const ChopSpan& other) const noexcept { return start == other.start && end == other.end; }
+};
+
 namespace ChopLimits
 {
     constexpr float minPitch = -24.0f, maxPitch = 24.0f;

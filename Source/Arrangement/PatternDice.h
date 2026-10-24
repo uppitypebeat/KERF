@@ -24,6 +24,7 @@ struct ChopTraits
     float level = 0.0f;   // how loud it is (its first 0.3 s; 1 = about -10 dB RMS)
     float f0 = 0.0f;      // its pitch in Hz (0 = none heard: noise, a click)
     int pitchClass = -1;  // that pitch as a note: 0 = C ... 11 = B, -1 = none
+    double start = 0.0;   // where it sits in the sample, in seconds (its place in the loop's groove)
 };
 
 ChopTraits describe (const SampleData& sample, const ChopParams& chop);
@@ -70,6 +71,7 @@ struct Options
     int style = -1;       // a style to use (an index into styleNames()), -1 = one that suits the tempo
     int avoidStyle = -1;  // with style -1: not this one (the last roll's - a fresh idea each time)
     int mode = 0;         // an index into modeNames()
+    double originSeconds = 0.0; // where the sample's beat grid starts (SHIFT): the chops' places in the bar
     juce::int64 seed = 0; // every decision comes from it: the same seed and options, the same pattern
     const std::vector<std::vector<PatternEvent>>* recent = nullptr; // the last rolls: a new one must differ
 };
@@ -99,5 +101,12 @@ juce::int64 fingerprint (const std::vector<PatternEvent>& events);
     too empty? a motif? does it develop? like one of the last rolls?) and a failed one is
     made again with the next seed, a few times at most. */
 Result roll (const std::vector<ChopTraits>& chops, const Options& options);
+
+/** LOCKS: a roll merged with the steps the user locked. Locked steps keep what they had
+    (`kept`: the events starting on them, held notes included; a locked empty step stays
+    empty). A rolled note that starts on a kept step goes; one that would run into one is
+    shortened to end before it. */
+std::vector<PatternEvent> withLocks (const std::vector<PatternEvent>& rolled, const std::vector<PatternEvent>& kept,
+                                     const std::vector<int>& lockedSteps);
 
 } // namespace kerf::PatternDice

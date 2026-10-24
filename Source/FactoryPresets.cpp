@@ -1,6 +1,8 @@
 #include "FactoryPresets.h"
 #include "Parameters.h"
 #include "Effects/TimeShaper.h"
+#include "Effects/PingPongDelay.h"
+#include <array>
 #include <map>
 
 namespace kerf::Factory
@@ -354,7 +356,7 @@ juce::StringArray categories()
 bool inScope (const juce::String& id)
 {
     static const juce::StringArray ids {
-        space, drive, dirtMode, wobble, wobbleMode, filter, resonance, pump, pumpMode,
+        space, spaceTime, spaceMode, drive, dirtMode, wobble, wobbleMode, filter, resonance, pump, pumpMode,
         grainMix, grainSize, grainDensity, grainSpray, grainPitchRnd, grainSpread, grainScan, grainReverse,
         grainPosition, grainPitch, grainDrift, grainShimmer, grainShape, grainScale, grainFreeze, grainSync,
         grainGlide, grainDetune, grainHaze,
@@ -456,6 +458,129 @@ juce::ValueTree toSound (const Preset& preset)
     }
 
     state.setProperty ("name", preset.name, nullptr);
+    return state;
+}
+
+juce::ValueTree randomSound (uint32_t seed, juce::String& description)
+{
+    juce::Random rng ((juce::int64) seed);
+    auto between = [&rng] (float lo, float hi) { return lo + (hi - lo) * rng.nextFloat(); };
+    auto logBetween = [&rng] (float lo, float hi) { return lo * std::pow (hi / lo, rng.nextFloat()); };
+    auto chance = [&rng] (float p) { return rng.nextFloat() < p; };
+
+    // Which effects: each by its own odds, then two to five of them.
+    enum Effect { delayFx, distortionFx, filterFx, wobbleFx, pumpFx, grainFx, timeFx, eqFx, numEffects };
+    const float odds[] = { 0.55f, 0.45f, 0.45f, 0.4f, 0.35f, 0.3f, 0.35f, 0.5f };
+    std::array<bool, numEffects> on {};
+    int count = 0;
+    for (int e = 0; e < numEffects; ++e)
+        count += (on[(size_t) e] = chance (odds[e])) ? 1 : 0;
+    while (count < 2)
+        if (const auto e = rng.nextInt (numEffects); ! on[(size_t) e]) { on[(size_t) e] = true; ++count; }
+    while (count > 5)
+        if (const auto e = rng.nextInt (numEffects); on[(size_t) e]) { on[(size_t) e] = false; --count; }
+
+    juce::ValueTree state ("SOUND");
+    auto add = [&state] (const juce::String& id, float value)
+    {
+        juce::ValueTree param ("PARAM");
+        param.setProperty ("id", id, nullptr);
+        param.setProperty ("value", value, nullptr);
+        state.appendChild (param, nullptr);
+    };
+    juce::StringArray rolled;
+    float level = 0.0f; // dB, against what the effects add or take
+
+    if (on[delayFx])
+    {
+        static const int times[] = { 0, 1, 2, 2, 3, 3, 4, 5, 5, 6 }; // the 1/8s and 1/4s most
+        const auto time = times[rng.nextInt (10)];
+        add (space, between (0.18f, 0.6f));
+        add (spaceTime, (float) time);
+        add (spaceMode, chance (0.7f) ? 0.0f : 1.0f);
+        rolled.add (juce::String ("Delay ") + PingPongDelay::Time::names[time]);
+    }
+    if (on[distortionFx])
+    {
+        const auto mode = rng.nextInt (3);
+        const auto amount = mode == 0 ? between (0.2f, 0.65f) : (mode == 1 ? between (0.15f, 0.55f) : between (0.3f, 0.75f));
+        add (drive, amount);
+        add (dirtMode, (float) mode);
+        level -= amount * (mode == 1 ? 9.0f : 6.0f);
+        rolled.add (mode == 0 ? "Warm" : (mode == 1 ? "Fuzz" : "Crush"));
+    }
+    if (on[filterFx])
+    {
+        const auto lowPass = chance (0.65f);
+        add (filter, lowPass ? -between (0.1f, 0.45f) : between (0.08f, 0.35f));
+        add (resonance, between (0.05f, 0.55f));
+        rolled.add (lowPass ? "Low-pass" : "High-pass");
+        level += lowPass ? 1.5f : 2.5f;
+    }
+    if (on[wobbleFx])
+    {
+        add (wobble, between (0.1f, 0.45f));
+        add (wobbleMode, chance (0.5f) ? tape : chorus);
+        rolled.add ("Wobble");
+    }
+    if (on[pumpFx])
+    {
+        const auto amount = between (0.25f, 0.7f);
+        add (pump, amount);
+        add (pumpMode, (float) rng.nextInt (3));
+        level += amount * 4.0f;
+        rolled.add ("Pump");
+    }
+    if (on[grainFx])
+    {
+        add (grainMix, between (0.2f, 0.65f));
+        add (grainSize, logBetween (20.0f, 400.0f));
+        add (grainDensity, logBetween (8.0f, 80.0f));
+        add (grainSpray, between (0.0f, 0.6f));
+        add (grainSpread, between (0.3f, 1.0f));
+        add (grainShape, chance (0.4f) ? soft : (chance (0.5f) ? hard : pluck));
+        add (grainDrift, between (0.0f, 0.5f));
+        if (chance (0.3f)) { add (grainPitchRnd, 12.0f); add (grainScale, chance (0.5f) ? octaves : fifths); }
+        if (chance (0.3f)) add (grainReverse, between (0.2f, 0.6f));
+        if (chance (0.2f)) add (grainShimmer, between (0.15f, 0.45f));
+        if (chance (0.15f)) add (grainGlide, (chance (0.5f) ? 1.0f : -1.0f) * between (0.3f, 1.0f));
+        if (chance (0.25f)) add (grainDetune, between (0.2f, 0.8f));
+        if (chance (0.35f)) add (grainHaze, between (0.2f, 0.8f));
+        level += 1.0f;
+        rolled.add ("Grains");
+    }
+    if (on[timeFx])
+    {
+        const auto slot = rng.nextInt (TimeFactory::numSlots);
+        add (timeSlot, (float) (slot + 1));
+        add (timeMix, between (0.35f, 0.8f));
+        add (timeLength, (float) rng.nextInt (3));
+        rolled.add (juce::String ("Time ") + TimeFactory::name (slot));
+    }
+    if (on[eqFx])
+    {
+        int band = 0;
+        auto point = [&] (int type, float freq, float gain, float q)
+        {
+            add (eqParamID (band, EqField::on), 1.0f);
+            add (eqParamID (band, EqField::type), (float) type);
+            add (eqParamID (band, EqField::freq), freq);
+            add (eqParamID (band, EqField::gain), gain);
+            add (eqParamID (band, EqField::q), q);
+            ++band;
+        };
+        if (chance (0.5f)) point (lowCut, logBetween (30.0f, 160.0f), 0.0f, 0.7f);
+        if (chance (0.5f)) point (lowShelf, logBetween (60.0f, 160.0f), between (-3.0f, 4.0f), 0.7f);
+        if (chance (0.6f)) point (bell, logBetween (200.0f, 3000.0f), between (-3.5f, 3.5f), between (0.7f, 1.5f));
+        if (band == 0 || chance (0.5f)) point (highShelf, logBetween (6000.0f, 12000.0f), between (-3.0f, 3.5f), 0.7f);
+        rolled.add ("EQ");
+    }
+
+    if (std::abs (level) >= 0.5f)
+        add (master, juce::jlimit (-8.0f, 4.0f, level));
+
+    state.setProperty ("name", "Random", nullptr);
+    description = rolled.joinIntoString (", ");
     return state;
 }
 

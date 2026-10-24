@@ -15,7 +15,9 @@ namespace kerf::Params
     inline constexpr auto stretchMode   = "stretch_mode";
     inline constexpr auto tempoSync     = "tempo_sync";
     // SPACE (stereo ping-pong delay)
-    inline constexpr auto space         = "space";
+    inline constexpr auto space         = "space";         // DELAY (the ID from when it was called SPACE)
+    inline constexpr auto spaceTime     = "space_time";    // DELAY: its note value (PingPongDelay::Time)
+    inline constexpr auto spaceMode     = "space_mode";    // DELAY: ping-pong or stereo
     // GRAIN
     inline constexpr auto grainMix      = "grain_mix";
     inline constexpr auto grainSize     = "grain_size";
@@ -47,7 +49,7 @@ namespace kerf::Params
     // TONE
     inline constexpr auto filter        = "filter";
     inline constexpr auto resonance     = "resonance";
-    // DIRT (distortion). "drive" keeps its old ID so saved projects keep their value.
+    // DIST (distortion, once DIRT). "drive" keeps its old ID so saved projects keep their value.
     inline constexpr auto drive         = "drive";
     inline constexpr auto dirtMode      = "dirt_mode";
     // WOBBLE (tape wow / chorus)

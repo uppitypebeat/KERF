@@ -9,13 +9,13 @@ namespace
         display), the theme's own light neutrals in white mode. */
     namespace Screen
     {
-        juce::Colour bg()       { return lightTheme() ? Colours::well : juce::Colour (0xff0c0c0e); }
-        juce::Colour raised()   { return lightTheme() ? Colours::surfaceRaised : juce::Colour (0xff1d1d21); }
-        juce::Colour hairline() { return lightTheme() ? Colours::hairline : juce::Colour (0xff26262a); }
-        juce::Colour line()     { return lightTheme() ? Colours::line : juce::Colour (0xff3a3a3f); }
-        juce::Colour ink()      { return lightTheme() ? Colours::text : juce::Colour (0xffe6e1d8); }
-        juce::Colour inkDim()   { return lightTheme() ? Colours::textDim : juce::Colour (0xff8e8a84); }
-        juce::Colour inkFaint() { return lightTheme() ? Colours::textFaint : juce::Colour (0xff5c5a56); }
+        juce::Colour bg()       { return juce::Colour (0xff0c0c0e); }
+        juce::Colour raised()   { return juce::Colour (0xff1d1d21); }
+        juce::Colour hairline() { return juce::Colour (0xff26262a); }
+        juce::Colour line()     { return juce::Colour (0xff3a3a3f); }
+        juce::Colour ink()      { return juce::Colour (0xffe6e1d8); }
+        juce::Colour inkDim()   { return juce::Colour (0xff8e8a84); }
+        juce::Colour inkFaint() { return juce::Colour (0xff5c5a56); }
     }
 
     constexpr float edgeHitRadius = 5.0f;
@@ -1247,6 +1247,16 @@ void WaveformView::paintWaveform (juce::Graphics& g)
             if (const auto tail = (float) frameToX (trailFrames[i]), head = (float) frameToX (trailHead[i]); std::abs (head - tail) > 1.0f)
                 trails.push_back ({ tail, head, trailLevel[i] });
 
+    // Columns of the same colours are gathered and filled together (a chop at a time, not two
+    // fills per pixel column).
+    juce::RectangleList<float> peakRects, rmsRects;
+    juce::Colour shownPeak, shownRms;
+    auto flush = [&]
+    {
+        if (! peakRects.isEmpty()) { g.setColour (shownPeak); g.fillRectList (peakRects); peakRects.clear(); }
+        if (! rmsRects.isEmpty())  { g.setColour (shownRms);  g.fillRectList (rmsRects);  rmsRects.clear(); }
+    };
+
     for (int col = 0; col < columns; ++col)
     {
         const auto f0 = viewStart + col * framesPerColumn;
@@ -1297,13 +1307,17 @@ void WaveformView::paintWaveform (juce::Graphics& g)
 
         const auto top = centreY - juce::jlimit (0.0f, 1.0f, bin.max * amp) * halfH;
         const auto bottom = centreY - juce::jlimit (-1.0f, 0.0f, bin.min * amp) * halfH;
-        g.setColour (peakColour);
-        g.fillRect (juce::Rectangle<float> (x, top, columnWidth, std::max (columnWidth, bottom - top)));
-
+        if (peakColour != shownPeak || rmsColour != shownRms)
+        {
+            flush();
+            shownPeak = peakColour;
+            shownRms = rmsColour;
+        }
+        peakRects.addWithoutMerging (juce::Rectangle<float> (x, top, columnWidth, std::max (columnWidth, bottom - top)));
         const auto rmsH = juce::jlimit (0.0f, 1.0f, bin.rms * amp) * halfH;
-        g.setColour (rmsColour);
-        g.fillRect (juce::Rectangle<float> (x, centreY - rmsH, columnWidth, std::max (columnWidth, rmsH * 2.0f)));
+        rmsRects.addWithoutMerging (juce::Rectangle<float> (x, centreY - rmsH, columnWidth, std::max (columnWidth, rmsH * 2.0f)));
     }
+    flush();
 }
 
 void WaveformView::paintGrains (juce::Graphics& g)

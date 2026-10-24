@@ -45,7 +45,7 @@ void Knob::attachClock (AnimationClock* c)
 
 juce::Rectangle<float> Knob::discArea() const
 {
-    const auto d = size == Size::hero ? 58.0f : (size == Size::large ? 40.0f : 30.0f);
+    const auto d = discSize (size);
     return juce::Rectangle<float> (d, d).withCentre ({ getWidth() * 0.5f, 8.0f + d * 0.5f });
 }
 
@@ -785,6 +785,23 @@ int Segmented::indexAt (juce::Point<int> p) const
 
 void Segmented::paint (juce::Graphics& g)
 {
+    if (cycling)
+    {
+        // The option chosen as a word, and a dot per option under it (the chosen one lit).
+        const auto r = getLocalBounds().toFloat();
+        const auto hover = isMouseOver();
+        drawText (g, options[selected], r.withHeight (r.getHeight() - 6.0f), TextStyle::label,
+                  hover ? Colours::accent.brighter (0.2f) : Colours::accent, juce::Justification::centred);
+        const auto n = options.size();
+        const auto gap = 7.0f;
+        auto x = r.getCentreX() - gap * (float) (n - 1) * 0.5f;
+        for (int i = 0; i < n; ++i, x += gap)
+        {
+            g.setColour (i == selected ? Colours::accent : Colours::textFaint.withAlpha (hover ? 0.9f : 0.6f));
+            g.fillEllipse (juce::Rectangle<float> (3.0f, 3.0f).withCentre ({ x, r.getBottom() - 3.0f }));
+        }
+        return;
+    }
     // The options in a recessed track; the chosen one a lit key in it, the one under the
     // mouse a faint key.
     const auto r = getLocalBounds().toFloat().reduced (0.5f);
@@ -822,6 +839,27 @@ void Segmented::paint (juce::Graphics& g)
 
 void Segmented::mouseDown (const juce::MouseEvent& e)
 {
+    if (cycling && ! options.isEmpty())
+    {
+        if (e.mods.isPopupMenu()) // a right-click: every option, to pick one
+        {
+            juce::PopupMenu menu;
+            for (int i = 0; i < options.size(); ++i)
+                menu.addItem (i + 1, options[i], true, i == selected);
+            menu.setLookAndFeel (&getLookAndFeel());
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
+                                [safe = juce::Component::SafePointer<Segmented> (this)] (int result)
+                                {
+                                    if (safe != nullptr && result > 0)
+                                        safe->setSelected (result - 1);
+                                });
+        }
+        else
+        {
+            setSelected ((selected + 1) % options.size()); // a click: the next one
+        }
+        return;
+    }
     if (e.mods.isPopupMenu())
         return; // a right-click: nothing
     if (const auto i = indexAt (e.getPosition()); i >= 0)

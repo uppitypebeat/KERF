@@ -12,7 +12,7 @@ namespace
     float smooth (float t) { t = juce::jlimit (0.0f, 1.0f, t); return t * t * (3.0f - 2.0f * t); }
 
     /** White-hot at night; a deep version of the colour in white mode (white would vanish). */
-    juce::Colour hot (juce::Colour c, float amount) { return c.interpolatedWith (lightTheme() ? c.darker (0.9f) : juce::Colours::white, amount); }
+    juce::Colour hot (juce::Colour c, float amount) { return c.interpolatedWith (juce::Colours::white, amount); }
 }
 
 float DropVortex::maxRadius (juce::Rectangle<float> area) const
@@ -218,7 +218,7 @@ void DropVortex::paint (juce::Graphics& g, juce::Rectangle<float> area) const
             g.fillEllipse (juce::Rectangle<float> (r * 10.0f, r * 10.0f).withCentre (core));
             g.setColour (hot (accent, 0.8f).withAlpha (c));
             g.drawEllipse (juce::Rectangle<float> (r * 2.0f + 3.0f, r * 2.0f + 3.0f).withCentre (core), 1.6f);
-            g.setColour (lightTheme() ? accent.darker (0.9f) : juce::Colour (0xff040306));
+            g.setColour (juce::Colour (0xff040306));
             g.fillEllipse (juce::Rectangle<float> (r * 2.0f, r * 2.0f).withCentre (core));
         }
 

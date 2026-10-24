@@ -13,6 +13,8 @@ void PingPongDelay::prepare (double newSampleRate, int)
     smoothDelay.reset (sampleRate, 0.25); // slow glide when the tempo or division changes
     for (auto* s : { &smoothWet, &smoothDry, &smoothFeedback, &smoothWidth, &smoothEnable })
         s->reset (sampleRate, 0.03);
+    smoothPingPong.reset (sampleRate, 0.08); // PING-PONG <-> STEREO: a short crossfade
+    smoothPingPong.setCurrentAndTargetValue (1.0f);
 
     smoothDry.setCurrentAndTargetValue (1.0f);
     smoothEnable.setCurrentAndTargetValue (1.0f);
@@ -72,6 +74,7 @@ void PingPongDelay::process (const float* sendL, const float* sendR, float* outL
     set (smoothWidth, juce::jlimit (0.0f, 1.0f, s.width));
     set (smoothEnable, s.enabled ? 1.0f : 0.0f);
     set (smoothDelay, targetDelay);
+    set (smoothPingPong, s.pingPong ? 1.0f : 0.0f);
 
     if (! juce::approximatelyEqual (s.tone, lastTone))
     {
@@ -89,24 +92,28 @@ void PingPongDelay::process (const float* sendL, const float* sendR, float* outL
         const auto fb = smoothFeedback.getNextValue();
         const auto width = smoothWidth.getNextValue();
         const auto enable = smoothEnable.getNextValue();
+        const auto pp = smoothPingPong.getNextValue(); // 1 ping-pong, 0 stereo (glides between)
 
         const auto tapL = readDelay (lineL, delay);
         const auto tapR = readDelay (lineR, delay);
 
-        // Input: mono sum enters the left line only; the cross-feedback makes it bounce.
-        const auto in = 0.5f * (sendL[i] + sendR[i]) * enable;
+        // PING-PONG: the mono sum enters the left line only and the cross-feedback makes it
+        // bounce. STEREO: each side into its own line, feeding back into itself.
+        const auto mono = 0.5f * (sendL[i] + sendR[i]) * enable;
+        const auto inL = pp * mono + (1.0f - pp) * sendL[i] * enable;
+        const auto inR = (1.0f - pp) * sendR[i] * enable;
 
         // Feedback path filtering: one-pole low-pass (damping) then one-pole high-pass.
-        lpStateL += lpCoeff * (tapR - lpStateL);
-        lpStateR += lpCoeff * (tapL - lpStateR);
+        lpStateL += lpCoeff * (pp * tapR + (1.0f - pp) * tapL - lpStateL);
+        lpStateR += lpCoeff * (pp * tapL + (1.0f - pp) * tapR - lpStateR);
         hpStateL = hpCoeff * hpStateL + (1.0f - hpCoeff) * lpStateL;
         hpStateR = hpCoeff * hpStateR + (1.0f - hpCoeff) * lpStateR;
         const auto fbL = lpStateL - hpStateL;
         const auto fbR = lpStateR - hpStateR;
 
         // Soft saturation in the loop: transparent at normal levels, prevents runaway.
-        lineL[(size_t) writePos] = std::tanh (in + fbL * fb);
-        lineR[(size_t) writePos] = std::tanh (fbR * fb);
+        lineL[(size_t) writePos] = std::tanh (inL + fbL * fb);
+        lineR[(size_t) writePos] = std::tanh (inR + fbR * fb);
 
         if (++writePos >= lineSize)
             writePos = 0;

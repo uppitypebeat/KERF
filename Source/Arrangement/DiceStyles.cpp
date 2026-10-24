@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <numeric>
 
 namespace kerf::PatternDice::detail
@@ -41,7 +42,7 @@ bool isDrumStyle (int style)
     return style >= boomBap && style <= amapiano;
 }
 
-int pickStyle (double bpm, bool drums, bool tonal, bool slices, int avoid, juce::Random& rng)
+int pickStyle (double bpm, bool drums, bool tonal, bool slices, bool placed, int avoid, juce::Random& rng)
 {
     // How likely each style is at this tempo
     // (boom bap, trap, drill, house, dnb, stutter, jersey club, amapiano, flip, chop up).
@@ -55,7 +56,7 @@ int pickStyle (double bpm, bool drums, bool tonal, bool slices, int avoid, juce:
         for (int i = boomBap; i <= amapiano; ++i) w[(size_t) i] *= 0.15f; // no drum hits in the sample: mostly a flip
     if (! tonal)
         w[flip] *= 0.2f;
-    w[chopUp] *= slices ? 1.5f : 0.2f; // long slices of a loop: re-arranging them is the classic
+    w[chopUp] *= placed ? 3.0f : (slices ? 1.5f : 0.2f); // a chopped loop: its own groove, flipped, is the classic
     if (avoid >= 0 && avoid < numStyles)
     {
         const auto others = std::accumulate (w.begin(), w.end(), 0.0f) - w[(size_t) avoid];
@@ -99,7 +100,7 @@ std::string varyBar (std::string bar, juce::Random& rng, float amount)
     return bar;
 }
 
-std::vector<PatternEvent> chopUpBars (const std::vector<ChopTraits>& chops, int bars, double bpm, juce::Random& rng)
+static std::vector<PatternEvent> slicesInOrder (const std::vector<ChopTraits>& chops, int bars, double bpm, juce::Random& rng)
 {
     // The chops in their order, each as long as it lasts at the tempo - then cut up: two swap
     // places, one stutters, the line jumps; more so with every bar, the last bar ending in a
@@ -170,6 +171,207 @@ std::vector<PatternEvent> chopUpBars (const std::vector<ChopTraits>& chops, int 
                 PatternEvent e;
                 e.step = bar * 16 + s;
                 e.chopId = rng.nextFloat() < 0.75f ? id : chops[(size_t) rng.nextInt ((int) count)].id;
+                e.velocity = 0.7f + 0.05f * (float) (s - end);
+                e.repeats = s >= 14 ? 4 : 2 + rng.nextInt (2);
+                events.push_back (e);
+            }
+        }
+    }
+    return events;
+}
+
+std::vector<std::pair<size_t, int>> placesInLoop (const std::vector<ChopTraits>& chops, double bpm, double originSeconds)
+{
+    std::vector<std::pair<size_t, int>> placed;
+    if (bpm <= 0.0 || chops.size() < 2)
+        return placed;
+    const auto stepSeconds = 60.0 / bpm / 4.0;
+    for (size_t i = 0; i < chops.size(); ++i)
+        if (const auto step = (int) std::lround ((chops[i].start - originSeconds) / stepSeconds); step >= 0)
+            placed.push_back ({ i, step });
+    // By step; on a shared step the louder one.
+    std::stable_sort (placed.begin(), placed.end(), [&chops] (const auto& a, const auto& b)
+                      { return a.second < b.second || (a.second == b.second && chops[a.first].level > chops[b.first].level); });
+    placed.erase (std::unique (placed.begin(), placed.end(), [] (const auto& a, const auto& b) { return a.second == b.second; }), placed.end());
+    if (placed.size() < 2)
+        placed.clear();
+    return placed;
+}
+
+std::vector<PatternEvent> chopUpBars (const std::vector<ChopTraits>& chops, int bars, double bpm, double originSeconds, juce::Random& rng)
+{
+    const auto placed = placesInLoop (chops, bpm, originSeconds);
+    if (placed.size() < 3)
+        return slicesInOrder (chops, bars, bpm, rng);
+
+    const auto stepSeconds = 60.0 / bpm / 4.0;
+    constexpr int barSteps = 16;
+    auto ownSteps = [&] (size_t i) { return juce::jlimit (1, 8, (int) std::lround (chops[i].seconds / stepSeconds)); };
+
+    // The loop: how many bars it spans; which of them this pattern starts from.
+    int lastEnd = 0;
+    for (const auto& [i, step] : placed)
+        lastEnd = std::max (lastEnd, step + ownSteps (i));
+    const auto loopBars = std::max (1, std::max ((int) std::lround (lastEnd / (double) barSteps), placed.back().second / barSteps + 1));
+    const auto offset = loopBars > bars && rng.nextFloat() < 0.5f ? rng.nextInt (loopBars - bars + 1) : 0;
+
+    // A bar as (step, chop index); the source bar's own hits.
+    using Hit = std::pair<int, size_t>;
+    auto sourceBar = [&] (int sourceIndex)
+    {
+        std::vector<Hit> hits;
+        for (const auto& [i, step] : placed)
+            if (step / barSteps == sourceIndex % loopBars)
+                hits.push_back ({ step % barSteps, i });
+        return hits;
+    };
+    auto similar = [&chops] (size_t a, size_t b)
+    {
+        // Two chops that could stand in for each other: both hits, or both tones.
+        return (chops[a].sustain > 0.35f) == (chops[b].sustain > 0.35f);
+    };
+
+    std::vector<PatternEvent> events;
+    const auto wildness = 0.7f + 0.6f * rng.nextFloat();
+    for (int bar = 0; bar < bars; ++bar)
+    {
+        auto hits = sourceBar (offset + bar);
+        std::map<int, int> repeatsAt; // step -> ratchet
+
+        // The first bar mostly as it is (the groove first heard), more flipped with every bar.
+        const auto chaos = wildness * (bars > 1 ? 0.12f + 0.5f * (float) bar / (float) (bars - 1) : 0.35f);
+        auto ops = (int) std::floor (chaos * 4.0f + rng.nextFloat());
+        enum Op { swap, stutter, repeatBeat, reverseBeat, drop, borrow, numOps };
+        while (ops-- > 0 && ! hits.empty())
+        {
+            const auto op = (Op) [&]
+            {
+                const float w[] = { 0.32f, 0.2f, 0.15f, 0.1f, 0.1f, loopBars > 1 ? 0.13f : 0.03f };
+                auto x = rng.nextFloat() * 1.0f;
+                for (int k = 0; k < numOps; ++k)
+                    if ((x -= w[k]) < 0.0f)
+                        return k;
+                return 0;
+            }();
+            auto inBeat = [&hits] (int beat)
+            {
+                std::vector<size_t> at;
+                for (size_t h = 0; h < hits.size(); ++h)
+                    if (hits[h].first / 4 == beat)
+                        at.push_back (h);
+                return at;
+            };
+            switch (op)
+            {
+                case swap:
+                {
+                    // Two hits trade chops (alike ones first: a kick for a kick).
+                    const auto a = (size_t) rng.nextInt ((int) hits.size());
+                    std::vector<size_t> partners;
+                    for (size_t h = 0; h < hits.size(); ++h)
+                        if (h != a && hits[h].second != hits[a].second && similar (hits[h].second, hits[a].second))
+                            partners.push_back (h);
+                    if (partners.empty())
+                        for (size_t h = 0; h < hits.size(); ++h)
+                            if (h != a && hits[h].second != hits[a].second)
+                                partners.push_back (h);
+                    if (! partners.empty())
+                        std::swap (hits[a].second, hits[partners[(size_t) rng.nextInt ((int) partners.size())]].second);
+                    break;
+                }
+                case stutter:
+                {
+                    // A hit ratchets, or rings out as a run of 16ths into the gap after it.
+                    const auto h = (size_t) rng.nextInt ((int) hits.size());
+                    if (rng.nextBool())
+                        repeatsAt[hits[h].first] = 2 + rng.nextInt (2);
+                    else
+                        for (int s = hits[h].first + 1, n = 0; s < barSteps && n < 3; ++s, ++n)
+                        {
+                            if (std::any_of (hits.begin(), hits.end(), [s] (const Hit& x) { return x.first == s; }))
+                                break;
+                            hits.push_back ({ s, hits[h].second });
+                        }
+                    break;
+                }
+                case repeatBeat:
+                {
+                    // One beat played again in place of the next (the classic sampler repeat).
+                    const auto beat = rng.nextInt (3);
+                    const auto from = inBeat (beat);
+                    if (from.empty())
+                        break;
+                    std::vector<Hit> copy;
+                    for (const auto h : from)
+                        copy.push_back ({ hits[h].first + 4, hits[h].second });
+                    hits.erase (std::remove_if (hits.begin(), hits.end(), [beat] (const Hit& x) { return x.first / 4 == beat + 1; }), hits.end());
+                    hits.insert (hits.end(), copy.begin(), copy.end());
+                    break;
+                }
+                case reverseBeat:
+                {
+                    const auto at = inBeat (rng.nextInt (4));
+                    for (size_t k = 0; k < at.size() / 2; ++k)
+                        std::swap (hits[at[k]].second, hits[at[at.size() - 1 - k]].second);
+                    break;
+                }
+                case drop:
+                    if (hits.size() >= 4)
+                    {
+                        const auto h = 1 + (size_t) rng.nextInt ((int) hits.size() - 1);
+                        if (hits[h].first != 0)
+                            hits.erase (hits.begin() + (std::ptrdiff_t) h);
+                    }
+                    break;
+                case borrow:
+                {
+                    // A beat from another bar of the loop (or another beat of this one).
+                    const auto beat = 1 + rng.nextInt (3);
+                    const auto other = sourceBar (offset + bar + 1 + rng.nextInt (std::max (1, loopBars)));
+                    const auto fromBeat = loopBars > 1 ? beat : rng.nextInt (4);
+                    hits.erase (std::remove_if (hits.begin(), hits.end(), [beat] (const Hit& x) { return x.first / 4 == beat; }), hits.end());
+                    for (const auto& x : other)
+                        if (x.first / 4 == fromBeat)
+                            hits.push_back ({ beat * 4 + x.first % 4, x.second });
+                    break;
+                }
+                case numOps: break;
+            }
+            std::sort (hits.begin(), hits.end());
+            hits.erase (std::unique (hits.begin(), hits.end(), [] (const Hit& a, const Hit& b) { return a.first == b.first; }), hits.end());
+        }
+
+        // The last bar: a run to finish (now and then).
+        const auto lastBar = bar == bars - 1 && (bars > 1 || rng.nextBool()) && rng.nextFloat() < 0.65f;
+        const auto end = lastBar ? 12 + 2 * rng.nextInt (2) : barSteps;
+        hits.erase (std::remove_if (hits.begin(), hits.end(), [end] (const Hit& x) { return x.first >= end; }), hits.end());
+        if (hits.empty() || hits.front().first != 0)
+            hits.insert (hits.begin(), { 0, hits.empty() ? placed.front().first : hits.front().second }); // always something on the one
+
+        for (size_t h = 0; h < hits.size(); ++h)
+        {
+            const auto [step, index] = hits[h];
+            const auto next = h + 1 < hits.size() ? hits[h + 1].first : end;
+            PatternEvent e;
+            e.step = bar * barSteps + step;
+            e.chopId = chops[index].id;
+            e.length = std::max (1, std::min (next - step, ownSteps (index)));
+            e.velocity = step % 4 == 0 ? 0.95f : (step % 2 == 0 ? 0.85f : 0.78f);
+            if (const auto r = repeatsAt.find (step); r != repeatsAt.end())
+            {
+                e.repeats = juce::jlimit (1, PatternEvent::maxRepeats, r->second);
+                e.length = std::min (e.length, 2);
+            }
+            events.push_back (e);
+        }
+        if (lastBar) // the run: the last hit ratcheting, faster at the end
+        {
+            const auto id = events.back().chopId;
+            for (int s = end; s < barSteps; ++s)
+            {
+                PatternEvent e;
+                e.step = bar * barSteps + s;
+                e.chopId = rng.nextFloat() < 0.75f ? id : chops[placed[(size_t) rng.nextInt ((int) placed.size())].first].id;
                 e.velocity = 0.7f + 0.05f * (float) (s - end);
                 e.repeats = s >= 14 ? 4 : 2 + rng.nextInt (2);
                 events.push_back (e);

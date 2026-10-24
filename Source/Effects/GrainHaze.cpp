@@ -82,11 +82,27 @@ void GrainHaze::process (const float* inL, const float* inR, float* outL, float*
     const auto smoothing = (float) (1.0 - std::exp (-1.0 / (0.05 * rate)));
     const auto levelSmoothing = (float) (1.0 - std::exp (-1.0 / (0.2 * rate)));
     constexpr float diffusion = 0.65f, inputGain = 0.35f;
+    // The slow things (the lines' modulation, the wet level) move every 16 samples: they are far
+    // too slow to need more, and it saves a sine per line and a power per sample.
+    constexpr int controlEvery = 16;
+    std::array<double, numLines> delays {};
+    float wet = 0.0f;
 
     for (int n = 0; n < numSamples; ++n)
     {
         shownAmount += (target - shownAmount) * smoothing;
-        const auto wet = std::pow (shownAmount, 0.8f) * 0.9f;
+        if (n % controlEvery == 0)
+        {
+            wet = std::pow (shownAmount, 0.8f) * 0.9f;
+            for (int i = 0; i < numLines; ++i)
+            {
+                auto& line = lines[(size_t) i];
+                delays[(size_t) i] = line.baseDelay * size + depth * std::sin (line.lfoPhase);
+                line.lfoPhase += line.lfoStep * controlEvery;
+                if (line.lfoPhase > juce::MathConstants<double>::twoPi)
+                    line.lfoPhase -= juce::MathConstants<double>::twoPi;
+            }
+        }
 
         // In: the lows taken out; mid (diffused) and side (for width).
         highPassL += (inL[n] - highPassL) * highPass;
@@ -99,7 +115,7 @@ void GrainHaze::process (const float* inL, const float* inR, float* outL, float*
             const auto delayed = d.buffer[(size_t) d.write];
             const auto out = delayed - diffusion * mid;
             d.buffer[(size_t) d.write] = mid + diffusion * out;
-            d.write = (d.write + 1) % (int) d.buffer.size();
+            if (++d.write == (int) d.buffer.size()) d.write = 0;
             mid = out;
         }
 
@@ -110,16 +126,12 @@ void GrainHaze::process (const float* inL, const float* inR, float* outL, float*
         {
             auto& line = lines[(size_t) i];
             const auto size_ = (int) line.buffer.size();
-            const auto delay = line.baseDelay * size + depth * std::sin (line.lfoPhase);
-            line.lfoPhase += line.lfoStep;
-            if (line.lfoPhase > juce::MathConstants<double>::twoPi)
-                line.lfoPhase -= juce::MathConstants<double>::twoPi;
-            auto readPos = (double) line.write - delay;
+            auto readPos = (double) line.write - delays[(size_t) i];
             while (readPos < 0.0)
                 readPos += size_;
             const auto i0 = (int) readPos;
             const auto frac = (float) (readPos - (double) i0);
-            const auto s0 = line.buffer[(size_t) i0], s1 = line.buffer[(size_t) ((i0 + 1) % size_)];
+            const auto s0 = line.buffer[(size_t) i0], s1 = line.buffer[(size_t) (i0 + 1 == size_ ? 0 : i0 + 1)];
             const auto v = s0 + (s1 - s0) * frac;
             line.damp = v + (line.damp - v) * dampCoeff;
             y[(size_t) i] = line.damp;
@@ -133,7 +145,7 @@ void GrainHaze::process (const float* inL, const float* inR, float* outL, float*
             const auto sign = (i & 2) ? -1.0f : 1.0f;
             const auto in = (mid * sign + side * (i < numLines / 2 ? 1.0f : -1.0f)) * inputGain;
             line.buffer[(size_t) line.write] = (y[(size_t) i] - householder) * feedback[(size_t) i] + in;
-            line.write = (line.write + 1) % (int) line.buffer.size();
+            if (++line.write == (int) line.buffer.size()) line.write = 0;
             if (i % 2 == 0) outLeft += y[(size_t) i] * sign;
             else            outRight += y[(size_t) i] * sign;
         }

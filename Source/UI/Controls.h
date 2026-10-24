@@ -96,6 +96,10 @@ public:
 
     static constexpr int preferredWidth (Size s)  { return s == Size::hero ? 84 : (s == Size::large ? 56 : 52); }
     static constexpr int preferredHeight (Size s) { return s == Size::hero ? 104 : (s == Size::large ? 84 : 70); }
+    /** The disc's diameter, and its bottom edge from the knob's top (the name and value sit a
+        fixed distance below it: knobs of different sizes line up by their disc bottoms). */
+    static constexpr float discSize (Size s)   { return s == Size::hero ? 58.0f : (s == Size::large ? 40.0f : 30.0f); }
+    static constexpr int discBottom (Size s)   { return 8 + (int) discSize (s); }
 
 private:
     void animationTick (double dt) override;
@@ -192,6 +196,9 @@ public:
     void setOptions (juce::StringArray newOptions);
     void setVertical (bool v) { vertical = v; repaint(); } // options stacked top to bottom
     void setColumns (int c)   { columns = c; repaint(); }  // a grid with this many columns (0 = one row)
+    /** A single word instead of a row: the option chosen, with a dot per option under it. A
+        click takes the next one, a right-click lists them all (minimal layouts: FX). */
+    void setCycling (bool c)  { cycling = c; repaint(); }
     std::function<void (int)> onChange;
 
     void paint (juce::Graphics&) override;
@@ -204,6 +211,7 @@ private:
     juce::StringArray options;
     int selected = 0, hovered = -1;
     bool vertical = false;
+    bool cycling = false;
     int columns = 0;
     juce::Rectangle<float> cellBounds (int index) const;
 };

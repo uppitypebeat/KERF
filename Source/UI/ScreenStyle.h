@@ -2,14 +2,14 @@
 
 #include "Theme.h"
 
-/** The "synth display" look shared by GRANULIZER and FX: a glowing screen with corner ticks,
-    HUD lettering, glowing strokes and CRT scanlines. Dark in the night themes; in white mode
-    the screen is light (the theme's sky shows through, the HUD is dark ink). */
+/** The "synth display" look shared by the screens (GRANULIZER, FX, TIME, EQ): a glowing screen
+    with corner ticks, HUD lettering, glowing strokes and CRT scanlines. Always a dark display
+    (in white mode too: the screens are drawn inside a ScreenScope). */
 namespace kerf::ui::screen
 {
-    inline juce::Colour bg()   { return lightTheme() ? Colours::well : juce::Colour (0xff0c0c0e); }
-    inline juce::Colour edge() { return lightTheme() ? Colours::line : juce::Colour (0xff2a2a2e); }
-    inline juce::Colour hud()  { return lightTheme() ? Colours::text : juce::Colour (0xffd9d4ca); }
+    inline juce::Colour bg()   { return juce::Colour (0xff0c0c0e); }
+    inline juce::Colour edge() { return juce::Colour (0xff2a2a2e); }
+    inline juce::Colour hud()  { return juce::Colour (0xffd9d4ca); }
 
     inline juce::Colour signal() { return Colours::accent; }
 
@@ -18,7 +18,7 @@ namespace kerf::ui::screen
     inline juce::Colour heat (juce::Colour c, float amount)
     {
         amount = juce::jlimit (0.0f, 1.0f, amount);
-        return lightTheme() ? c.interpolatedWith (c.darker (0.9f), amount * 0.7f) : c.interpolatedWith (juce::Colours::white, amount);
+        return c.interpolatedWith (juce::Colours::white, amount);
     }
     inline juce::Colour hot (float amount) { return heat (signal(), amount); }
 
@@ -79,7 +79,7 @@ namespace kerf::ui::screen
     {
         // On whole pixels: fractional rows are anti-aliased edge by edge, which cost more than
         // everything else on a screen.
-        g.setColour (juce::Colours::black.withAlpha (lightTheme() ? alpha * 0.35f : alpha));
+        g.setColour (juce::Colours::black.withAlpha (alpha));
         const auto r = area.getSmallestIntegerContainer();
         for (auto y = r.getY(); y < r.getBottom(); y += 3)
             g.fillRect (r.getX(), y, r.getWidth(), 1);

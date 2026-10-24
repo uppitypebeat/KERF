@@ -306,6 +306,89 @@ bool ChopModel::replaceWithBoundaries (const std::vector<int64_t>& boundariesIn)
     return true;
 }
 
+std::vector<ChopSpan> ChopModel::cleanSpans (std::vector<ChopSpan> spans, int limit, int64_t maxGap) const
+{
+    if (limit <= 0)
+        limit = chopLimit();
+    const auto len = getSampleLength();
+    for (auto& s : spans)
+    {
+        s.start = std::clamp<int64_t> (s.start, 0, len);
+        s.end = std::clamp<int64_t> (s.end, 0, len);
+    }
+    std::sort (spans.begin(), spans.end(), [] (const ChopSpan& a, const ChopSpan& b) { return a.start < b.start; });
+
+    std::vector<ChopSpan> clean;
+    for (auto s : spans)
+    {
+        if (! clean.empty())
+            s.start = std::max (s.start, clean.back().end);
+        if (s.end - s.start >= ChopLimits::minLength)
+            clean.push_back (s);
+    }
+
+    // At most one per key: the last one reaches over the chops after it (up to a silence).
+    if ((int) clean.size() > limit)
+    {
+        auto end = clean[(size_t) limit - 1].end;
+        for (auto i = (size_t) limit; i < clean.size() && clean[i].start - end < maxGap; ++i)
+            end = clean[i].end;
+        clean.resize ((size_t) limit);
+        clean.back().end = end;
+    }
+    return clean;
+}
+
+bool ChopModel::replaceWithSpans (const std::vector<ChopSpan>& spans, int64_t maxGap)
+{
+    const auto clean = cleanSpans (spans, 0, maxGap);
+    if (clean.empty())
+        return false;
+
+    state.removeAllChildren (undoManager);
+    const auto root = getRootNote();
+    for (size_t i = 0; i < clean.size(); ++i)
+        state.appendChild (createChopTree (clean[i].start, clean[i].end, root + (int) i <= 127 ? root + (int) i : -1), undoManager);
+    return true;
+}
+
+bool ChopModel::subdivideIntoSpans (int chopId, const std::vector<ChopSpan>& spans)
+{
+    auto t = findChop (chopId);
+    if (! t.isValid())
+        return false;
+
+    const auto original = fromTree (t);
+    std::vector<ChopSpan> inside;
+    for (auto s : spans)
+    {
+        s.start = std::max (s.start, original.start);
+        s.end = std::min (s.end, original.end);
+        if (s.end > s.start)
+            inside.push_back (s);
+    }
+
+    // The other chops stay: room for the rest of the keys.
+    const auto clean = cleanSpans (inside, std::max (1, chopLimit() - getNumChops() + 1));
+    if (clean.empty() || (clean.size() == 1 && clean.front() == ChopSpan { original.start, original.end }))
+        return false;
+
+    t.setProperty (IDs::start, (juce::int64) clean.front().start, undoManager);
+    t.setProperty (IDs::end, (juce::int64) clean.front().end, undoManager);
+    for (size_t i = 1; i < clean.size(); ++i)
+    {
+        auto copy = original;
+        copy.start = clean[i].start;
+        copy.end = clean[i].end;
+        auto tree = createChopTree (copy.start, copy.end, lowestFreeNote());
+        copy.id = (int) tree.getProperty (IDs::id);
+        copy.note = (int) tree.getProperty (IDs::note);
+        writeToTree (tree, copy, nullptr);
+        state.appendChild (tree, undoManager);
+    }
+    return true;
+}
+
 bool ChopModel::subdivide (int chopId, const std::vector<int64_t>& boundaries)
 {
     auto t = findChop (chopId);

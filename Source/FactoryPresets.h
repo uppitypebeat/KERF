@@ -30,4 +30,9 @@ bool inScope (const juce::String& parameterId);
     the rest of the scope is left out, i.e. defaults). */
 juce::ValueTree toSound (const Preset& preset);
 
+/** RANDOM: a new sound from `seed` - two to five of the effects (DELAY, DISTORTION, FILTER,
+    WOBBLE, PUMP, the granulizer, TIME, EQ), each with its own random settings in a range
+    that makes music, the rest off; the level matched. `description` says what it rolled. */
+juce::ValueTree randomSound (uint32_t seed, juce::String& description);
+
 } // namespace kerf::Factory

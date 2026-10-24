@@ -351,10 +351,12 @@ void EqView::paint (juce::Graphics& g)
             auto box = juce::Rectangle<float> (w, 20.0f).withPosition (hoverPoint.x + 14.0f, hoverPoint.y - 30.0f);
             if (box.getRight() > plot.getRight()) box.setX (hoverPoint.x - 14.0f - w);
             if (box.getY() < plot.getY()) box.setY (hoverPoint.y + 12.0f);
-            g.setColour (Colours::surfaceRaised.withAlpha (0.95f));
-            g.fillRoundedRectangle (box, 3.0f);
-            g.setColour (Colours::accent.withAlpha (0.6f));
-            g.drawRoundedRectangle (box, 3.0f, 1.0f);
+            // Like a button that is on (it is the point a double-click adds): the screen behind it, lit.
+            g.setColour (backdropColour (*this, box.getCentre(), Backdrop::deep));
+            g.fillRoundedRectangle (box, Face::radius);
+            Face::State lit;
+            lit.on = true;
+            Face::key (g, box, lit);
             if (const auto icon = eqTypeIcon ((int) s.type, Colours::accent))
                 icon->drawWithin (g, box.withTrimmedLeft (8.0f).withWidth (24.0f).reduced (0.0f, 4.0f), juce::RectanglePlacement::centred, 1.0f);
             drawText (g, text, box.withTrimmedLeft (38.0f), TextStyle::micro, Colours::text);
@@ -412,10 +414,10 @@ void EqView::paint (juce::Graphics& g)
         // (A size up from the other annotations: it is what you read while dragging.)
         const auto w = textWidth (text, TextStyle::value) + 20.0f;
         const auto box = juce::Rectangle<float> (w, 22.0f).withPosition (plot.getRight() - w, plot.getY() + 4.0f);
-        g.setColour (Colours::surfaceRaised);
-        g.fillRect (box);
-        g.setColour (Colours::line);
-        g.drawRect (box, 1.0f);
+        // Like the buttons: the screen behind it (the curve does not show through), a fine outline.
+        g.setColour (backdropColour (*this, box.getCentre(), Backdrop::deep));
+        g.fillRoundedRectangle (box, Face::radius);
+        Face::key (g, box, {});
         drawText (g, text, box, TextStyle::value, Colours::text, juce::Justification::centred);
     }
     else if (shown.isFlat() && std::all_of (presence.begin(), presence.end(), [] (float p) { return p < 0.01f; }))

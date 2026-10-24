@@ -224,6 +224,8 @@ public:
     /** The beat position the PUMP follows (host, pattern or its own clock), for the UI. */
     double getPumpPpq() const noexcept     { return pumpPpqForUi.load (std::memory_order_relaxed); }
     float getHazeLevel() const noexcept    { return hazeLevelForUi.load (std::memory_order_relaxed); } // HAZE's tail, for the galaxy
+    /** The DELAY for an amount at a tempo: its note value and mode as set. */
+    kerf::PingPongDelay::Settings delaySettings (float amount, double tempo) const;
     int getPatternStep() const noexcept { return patternPlayer.getCurrentStep(); }
 
     // Recording / capture (Milestone 7)
@@ -248,6 +250,8 @@ public:
         pads stay). Undoable. */
     void loadFactoryPreset (int index);
     void initPreset();                         // "Default": every parameter to its default (undoable)
+    /** RANDOM: a new random sound for the effects every time (Factory::randomSound). */
+    void randomPreset();
     /** The previous / next preset in menu order (Default, factory, then yours), round the list. */
     void stepPreset (int direction);
     /** "Default" until a preset is loaded (projects from before 0.5 say "Init" for it). */
@@ -383,7 +387,10 @@ private:
     juce::ValueTree createStateTree();
     void applyStateTree (const juce::ValueTree& tree);
     int64_t regionForChopping (int64_t& start) const;
-    void replaceChopsUndoable (const std::vector<int64_t>& boundaries, const juce::String& actionName);
+    void replaceChopsUndoable (const std::vector<kerf::ChopSpan>& spans, const juce::String& actionName);
+    /** Cuts made on a grid or on hits as chops on the sound: onto the hits near them
+        (`snapStep`: the grid's step, 0 = no snapping), the silence left out. */
+    std::vector<kerf::ChopSpan> chopsOnTheSound (std::vector<int64_t> cuts, double snapStep) const;
 
     // Stretch mode (Milestone 6): background pre-rendering of chops.
     double currentStretchRatio() const;
@@ -497,6 +504,7 @@ private:
         std::atomic<float>* grainShape = nullptr; std::atomic<float>* grainScale = nullptr;
         std::atomic<float>* grainFreeze = nullptr; std::atomic<float>* grainSync = nullptr;
         std::atomic<float>* grainGlide = nullptr; std::atomic<float>* grainDetune = nullptr; std::atomic<float>* grainHaze = nullptr;
+        std::atomic<float>* spaceTime = nullptr; std::atomic<float>* spaceMode = nullptr;
         std::atomic<float>* timeSlot = nullptr; std::atomic<float>* timeMix = nullptr; std::atomic<float>* timeLength = nullptr;
         std::atomic<float>* grainOff = nullptr; std::atomic<float>* fxOff = nullptr; std::atomic<float>* eqOff = nullptr; std::atomic<float>* timeOff = nullptr;
         std::array<std::array<std::atomic<float>*, 6>, kerf::Params::eqBands> eq {}; // on, type, freq, gain, q, bypass

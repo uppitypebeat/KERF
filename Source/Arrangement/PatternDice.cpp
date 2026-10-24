@@ -79,6 +79,7 @@ ChopTraits describe (const SampleData& sample, const ChopParams& chop)
     ChopTraits t;
     t.id = chop.id;
     t.seconds = (double) chop.length() / std::max (1.0, sample.sampleRate);
+    t.start = (double) chop.start / std::max (1.0, sample.sampleRate);
 
     const auto rate = std::max (1.0, sample.sampleRate);
     const auto start = juce::jlimit<int64_t> (0, std::max<int64_t> (0, sample.getNumSamples() - 1), chop.start);
@@ -290,4 +291,28 @@ Result roll (const std::vector<ChopTraits>& chops, const Options& options)
     return result;
 }
 
+
+std::vector<PatternEvent> withLocks (const std::vector<PatternEvent>& rolled, const std::vector<PatternEvent>& kept,
+                                     const std::vector<int>& lockedSteps)
+{
+    // Every step taken by a lock: the locked steps, and the steps their notes hold on to.
+    std::vector<int> taken (lockedSteps.begin(), lockedSteps.end());
+    for (const auto& e : kept)
+        for (int k = 0; k < std::max (1, e.length); ++k)
+            taken.push_back (e.step + k);
+    std::sort (taken.begin(), taken.end());
+    auto isTaken = [&taken] (int s) { return std::binary_search (taken.begin(), taken.end(), s); };
+
+    std::vector<PatternEvent> out (kept.begin(), kept.end());
+    for (auto e : rolled)
+    {
+        if (isTaken (e.step))
+            continue;
+        for (int k = 1; k < e.length; ++k)
+            if (isTaken (e.step + k)) { e.length = k; break; }
+        out.push_back (e);
+    }
+    std::sort (out.begin(), out.end(), [] (const PatternEvent& a, const PatternEvent& b) { return a.step < b.step; });
+    return out;
+}
 } // namespace kerf::PatternDice

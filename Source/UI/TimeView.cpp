@@ -373,10 +373,13 @@ void TimeView::paintTape (juce::Graphics& g, juce::Rectangle<float> s)
     const auto supply = r * 0.86f, takeUp = r * 0.58f;
     {
         juce::Path tape;
-        tape.startNewSubPath (left.x - supply * 0.2f, left.y + supply);
-        tape.quadraticTo (left.x + r * 0.4f, head.y + 2.0f, head.x - 8.0f, head.y);
-        tape.lineTo (head.x + 8.0f, head.y);
-        tape.quadraticTo (right.x - r * 0.4f, head.y + 2.0f, right.x + takeUp * 0.2f, right.y + takeUp);
+        // A round loop: down off each pack and round the bottom in one soft curve (two quarter
+        // ellipses meeting under the middle), no flat stretch.
+        const juce::Point<float> from (left.x - supply * 0.15f, left.y + supply * 0.99f), to (right.x + takeUp * 0.15f, right.y + takeUp * 0.99f);
+        constexpr float k = 0.552f; // (a quarter circle's handle length)
+        tape.startNewSubPath (from);
+        tape.cubicTo (from.x, from.y + (head.y - from.y) * k, head.x - (head.x - from.x) * k, head.y, head.x, head.y);
+        tape.cubicTo (head.x + (to.x - head.x) * k, head.y, to.x, to.y + (head.y - to.y) * k, to.x, to.y);
         g.setColour (screen::hud().withAlpha (0.45f));
         g.strokePath (tape, juce::PathStrokeType (1.4f));
     }

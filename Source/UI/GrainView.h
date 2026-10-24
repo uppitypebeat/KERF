@@ -71,7 +71,6 @@ private:
     float meteorClock = 0.0f;
     juce::Image skyImage;
     juce::Colour skyColour;
-    bool skyLight = false; // the sky was built for white mode
     juce::Random sparkRandom;
     float starSpin = 0.0f, swirl = 0.0f;
     int shownChopId = 0, baselineChopId = -1;  // shownChopId: the voice's chop (or the whole sample)
