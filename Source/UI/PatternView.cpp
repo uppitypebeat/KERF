@@ -440,6 +440,37 @@ void PatternView::paint (juce::Graphics& g)
         }
     }
 
+    // Under the mouse: on an empty step, a faint preview of the chop a click places there;
+    // on a note, the grip at its right edge (drag it: longer or shorter).
+    if (hoveredStep >= 0 && drag == Drag::none && hoveredStep / stepsPerPage == page)
+    {
+        const auto hovered = processor.getPattern().eventAt (hoveredStep);
+        if (! hovered.has_value() && selected != 0 && chopIndexOf (selected) >= 0)
+        {
+            const auto b = cellBounds (hoveredStep - page * stepsPerPage).reduced (1.0f);
+            const auto colour = chopColour (selected, chops.empty() ? 0 : chops.front().id);
+            g.setColour (colour.withAlpha (0.08f));
+            g.fillRoundedRectangle (b, Metrics::radiusSmall);
+            juce::Path border, dashed;
+            border.addRoundedRectangle (b, Metrics::radiusSmall);
+            const float dashes[] = { 3.0f, 2.5f };
+            juce::PathStrokeType (Metrics::hairline).createDashedStroke (dashed, border, dashes, 2);
+            g.setColour (colour.withAlpha (0.55f));
+            g.fillPath (dashed);
+            drawText (g, juce::String (chopIndexOf (selected) + 1).paddedLeft ('0', 2), b.reduced (4.0f, 3.0f).withTrimmedTop (b.getHeight() * 0.4f),
+                      TextStyle::value, colour.withAlpha (0.6f));
+        }
+        if (hovered.has_value() && (hovered->step + hovered->length - 1) / stepsPerPage == page)
+        {
+            const auto span = spanBounds (*hovered).reduced (1.0f);
+            const auto colour = chopColour (hovered->chopId, chops.empty() ? 0 : chops.front().id);
+            const auto onEdge = hoveredEdge == hovered->step;
+            g.setColour (inkColour (colour).withAlpha (onEdge ? 1.0f : 0.55f));
+            for (const auto dx : { 4.0f, 7.0f })
+                g.fillRoundedRectangle (juce::Rectangle<float> (1.5f, span.getHeight() * 0.36f).withCentre ({ span.getRight() - dx, span.getCentreY() }), 0.75f);
+        }
+    }
+
     // LOCKS: a small padlock in the corner of every locked step; an empty locked step also
     // gets an outline in the accent (it stays empty when the die rolls).
     for (const auto lockedStep : processor.getPattern().getLocks())
@@ -490,6 +521,30 @@ void PatternView::animationTick (double dt)
         play.setToggleState (processor.isPatternPlaying(), juce::dontSendNotification);
 }
 
+juce::Rectangle<float> PatternView::spanBounds (const PatternEvent& e) const
+{
+    const auto first = juce::jlimit (0, stepsPerPage - 1, e.step - page * stepsPerPage);
+    const auto last = juce::jlimit (0, stepsPerPage - 1, e.step + e.length - 1 - page * stepsPerPage);
+    const auto a = cellBounds (first), z = cellBounds (last);
+    return { a.getX(), a.getY(), z.getRight() - a.getX(), a.getHeight() };
+}
+
+int PatternView::edgeOf (juce::Point<float> p) const
+{
+    // The last 9 px of a note (at least a third of a short one), on this page.
+    for (const auto& e : events)
+    {
+        const auto end = e.step + e.length - 1;
+        if (end / stepsPerPage != page)
+            continue;
+        const auto span = spanBounds (e);
+        const auto grip = std::min (9.0f, span.getWidth() / 3.0f);
+        if (span.withTrimmedLeft (span.getWidth() - grip).expanded (1.0f, 0.0f).contains (p))
+            return e.step;
+    }
+    return -1;
+}
+
 void PatternView::mouseDown (const juce::MouseEvent& e)
 {
     const auto step = stepAt (e.position);
@@ -521,6 +576,17 @@ void PatternView::mouseDown (const juce::MouseEvent& e)
     pressStep = -1;
     swallowed.clear();
 
+    // The right edge of a note: its length, straight away.
+    if (const auto edge = edgeOf (e.position); edge >= 0 && ! e.mods.isShiftDown())
+    {
+        um.beginNewTransaction ("Step length");
+        dragStep = edge;
+        pressStep = edge; // (not moved: a click, it goes)
+        pressPlaced = false;
+        drag = Drag::length;
+        return;
+    }
+
     if (e.mods.isShiftDown() && existing.has_value())
     {
         um.beginNewTransaction ("Step length");
@@ -530,11 +596,11 @@ void PatternView::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    if (existing.has_value() && existing->step == step)
+    if (existing.has_value())
     {
-        // On a step that starts here: wait. A click removes / swaps it on release, a drag
-        // edits its length or velocity.
-        pressStep = step;
+        // On a note (its first step or a held one): wait. A click removes it on release, a
+        // drag edits its length or velocity.
+        pressStep = existing->step;
         pressPlaced = false;
         pressVelocity = existing->velocity;
         drag = Drag::undecided;
@@ -580,21 +646,20 @@ void PatternView::mouseDrag (const juce::MouseEvent& e)
     }
 }
 
-void PatternView::mouseUp (const juce::MouseEvent&)
+void PatternView::mouseUp (const juce::MouseEvent& e)
 {
-    // A click (no drag) on a step that was already there: the selected chop removes it,
-    // another chop takes its place (keeping its velocity, pitch, chance and repeats).
+    // Pressed on a note's right edge and let go without moving: a click on the note.
+    if (drag == Drag::length && pressStep >= 0 && ! pressPlaced && e.getDistanceFromDragStart() < 3)
+        drag = Drag::undecided;
+
+    // A click (no drag) on a note: it goes (another chop: right-click > Chop).
     if (drag == Drag::undecided && ! pressPlaced && pressStep >= 0)
     {
         auto& pattern = processor.getPattern();
-        const auto selected = (int) processor.getSettings().getProperty ("selectedChop", 0);
         if (const auto existing = pattern.eventAt (pressStep); existing.has_value() && existing->step == pressStep)
         {
-            processor.getUndoManager().beginNewTransaction ("Edit step");
-            if (existing->chopId == selected || selected == 0)
-                pattern.removeEventStartingAt (pressStep);
-            else
-                pattern.setEvent (pressStep, selected, existing->length);
+            processor.getUndoManager().beginNewTransaction ("Remove step");
+            pattern.removeEventStartingAt (pressStep);
         }
     }
 
@@ -665,13 +730,24 @@ void PatternView::report (int step, const juce::String& what)
 void PatternView::mouseMove (const juce::MouseEvent& e)
 {
     const auto step = stepAt (e.position);
-    setMouseCursor (step >= 0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
-    if (step != hoveredStep) { hoveredStep = step; repaint(); }
+    const auto edge = step >= 0 ? edgeOf (e.position) : -1;
+    setMouseCursor (edge >= 0 ? juce::MouseCursor::LeftRightResizeCursor
+                              : (step >= 0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor));
+    if (step != hoveredStep || edge != hoveredEdge)
+    {
+        hoveredStep = step;
+        hoveredEdge = edge;
+        repaint();
+    }
 }
 
 void PatternView::mouseExit (const juce::MouseEvent&)
 {
-    if (hoveredStep != -1) { hoveredStep = -1; repaint(); }
+    if (hoveredStep != -1 || hoveredEdge != -1)
+    {
+        hoveredStep = hoveredEdge = -1;
+        repaint();
+    }
 }
 
 void PatternView::showStepMenu (int step)

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <array>
 #include <map>
 #include <numeric>
 
@@ -56,7 +57,7 @@ int pickStyle (double bpm, bool drums, bool tonal, bool slices, bool placed, int
         for (int i = boomBap; i <= amapiano; ++i) w[(size_t) i] *= 0.15f; // no drum hits in the sample: mostly a flip
     if (! tonal)
         w[flip] *= 0.2f;
-    w[chopUp] *= placed ? 3.0f : (slices ? 1.5f : 0.2f); // a chopped loop: its own groove, flipped, is the classic
+    w[chopUp] *= placed ? 2.0f : (slices ? 1.5f : 0.2f); // a chopped loop: its own groove, flipped, is the classic
     if (avoid >= 0 && avoid < numStyles)
     {
         const auto others = std::accumulate (w.begin(), w.end(), 0.0f) - w[(size_t) avoid];
@@ -198,7 +199,8 @@ std::vector<std::pair<size_t, int>> placesInLoop (const std::vector<ChopTraits>&
     return placed;
 }
 
-std::vector<PatternEvent> chopUpBars (const std::vector<ChopTraits>& chops, int bars, double bpm, double originSeconds, juce::Random& rng)
+std::vector<PatternEvent> chopUpBars (const std::vector<ChopTraits>& chops, int bars, double bpm, double originSeconds, juce::Random& rng,
+                                       juce::String* recipeName)
 {
     const auto placed = placesInLoop (chops, bpm, originSeconds);
     if (placed.size() < 3)
@@ -208,12 +210,13 @@ std::vector<PatternEvent> chopUpBars (const std::vector<ChopTraits>& chops, int 
     constexpr int barSteps = 16;
     auto ownSteps = [&] (size_t i) { return juce::jlimit (1, 8, (int) std::lround (chops[i].seconds / stepSeconds)); };
 
-    // The loop: how many bars it spans; which of them this pattern starts from.
+    // The loop: how many bars it spans; which of them this pattern starts from (another
+    // stretch of it each roll).
     int lastEnd = 0;
     for (const auto& [i, step] : placed)
         lastEnd = std::max (lastEnd, step + ownSteps (i));
     const auto loopBars = std::max (1, std::max ((int) std::lround (lastEnd / (double) barSteps), placed.back().second / barSteps + 1));
-    const auto offset = loopBars > bars && rng.nextFloat() < 0.5f ? rng.nextInt (loopBars - bars + 1) : 0;
+    const auto offset = loopBars > 1 ? rng.nextInt (loopBars) : 0;
 
     // A bar as (step, chop index); the source bar's own hits.
     using Hit = std::pair<int, size_t>;
@@ -230,26 +233,80 @@ std::vector<PatternEvent> chopUpBars (const std::vector<ChopTraits>& chops, int 
         // Two chops that could stand in for each other: both hits, or both tones.
         return (chops[a].sustain > 0.35f) == (chops[b].sustain > 0.35f);
     };
+    auto tidyHits = [] (std::vector<Hit>& hits)
+    {
+        std::sort (hits.begin(), hits.end());
+        hits.erase (std::unique (hits.begin(), hits.end(), [] (const Hit& a, const Hit& b) { return a.first == b.first; }), hits.end());
+    };
+
+    // The roll's idea - how the loop gets flipped. Each one changes the groove from the
+    // first bar on, more with every bar:
+    //   REMIX         the hits trade chops, chops from elsewhere in the loop come in
+    //   STUTTER EDIT  hits ratchet and ring on in 16ths, beats repeat
+    //   HALF-TIME     the loop at half speed (half a bar of it per bar)
+    //   SPARSE        many hits gone, space and longer notes
+    //   BACKWARDS     each half bar's chops in reverse order
+    //   BEATS SWAPPED the four beats in a new order (the same for every bar)
+    enum Recipe { remix, stutterEdit, halfTime, sparse, backwards, beatShuffle, numRecipes };
+    static const char* recipeNames[] = { "remix", "stutter edit", "half-time", "sparse", "backwards", "beats swapped" };
+    const auto recipe = (Recipe) rng.nextInt (numRecipes);
+    if (recipeName != nullptr)
+        *recipeName = recipeNames[recipe];
+    std::array<int, 4> beatOrder { 0, 1, 2, 3 };
+    if (recipe == beatShuffle)
+        while (beatOrder == std::array<int, 4> { 0, 1, 2, 3 } || beatOrder[0] != 0) // the one stays the one
+            for (int k = 3; k > 0; --k)
+                std::swap (beatOrder[(size_t) k], beatOrder[(size_t) rng.nextInt (k + 1)]);
+
+    enum Op { swap, stutter, repeatBeat, reverseBeat, drop, borrow, substitute, numOps };
+    std::array<float, numOps> weights { 0.3f, 0.18f, 0.14f, 0.1f, 0.1f, loopBars > 1 ? 0.13f : 0.03f, 0.15f };
+    if (recipe == remix)       { weights[swap] = 0.6f; weights[substitute] = 0.6f; }
+    if (recipe == stutterEdit) { weights[stutter] = 0.7f; weights[repeatBeat] = 0.5f; }
+    if (recipe == sparse)      { weights[drop] = 0.5f; }
 
     std::vector<PatternEvent> events;
     const auto wildness = 0.7f + 0.6f * rng.nextFloat();
     for (int bar = 0; bar < bars; ++bar)
     {
-        auto hits = sourceBar (offset + bar);
+        std::vector<Hit> hits;
+        if (recipe == halfTime)
+        {
+            // Half a bar of the loop, stretched over this one.
+            const auto half = bar % 2;
+            for (const auto& [step, index] : sourceBar (offset + bar / 2))
+                if (step / 8 == half)
+                    hits.push_back ({ (step - half * 8) * 2, index });
+        }
+        else
+            hits = sourceBar (offset + bar);
+        if (recipe == beatShuffle)
+            for (auto& h : hits)
+                h.first = beatOrder[(size_t) (h.first / 4)] * 4 + h.first % 4;
+        if (recipe == backwards)
+            for (int half = 0; half < 2; ++half)
+            {
+                std::vector<size_t> at;
+                for (size_t h = 0; h < hits.size(); ++h)
+                    if (hits[h].first / 8 == half)
+                        at.push_back (h);
+                for (size_t k = 0; k < at.size() / 2; ++k)
+                    std::swap (hits[at[k]].second, hits[at[at.size() - 1 - k]].second);
+            }
+        if (recipe == sparse && hits.size() > 3)
+            hits.erase (std::remove_if (hits.begin(), hits.end(), [&rng] (const Hit& x) { return x.first != 0 && rng.nextFloat() < 0.45f; }), hits.end());
+        tidyHits (hits);
         std::map<int, int> repeatsAt; // step -> ratchet
 
-        // The first bar mostly as it is (the groove first heard), more flipped with every bar.
-        const auto chaos = wildness * (bars > 1 ? 0.12f + 0.5f * (float) bar / (float) (bars - 1) : 0.35f);
-        auto ops = (int) std::floor (chaos * 4.0f + rng.nextFloat());
-        enum Op { swap, stutter, repeatBeat, reverseBeat, drop, borrow, numOps };
+        // Changed from the first bar on, more with every bar.
+        const auto chaos = wildness * (bars > 1 ? 0.3f + 0.45f * (float) bar / (float) (bars - 1) : 0.5f);
+        auto ops = std::max (1, (int) std::floor (chaos * 4.0f + rng.nextFloat()));
         while (ops-- > 0 && ! hits.empty())
         {
             const auto op = (Op) [&]
             {
-                const float w[] = { 0.32f, 0.2f, 0.15f, 0.1f, 0.1f, loopBars > 1 ? 0.13f : 0.03f };
-                auto x = rng.nextFloat() * 1.0f;
+                auto x = rng.nextFloat() * std::accumulate (weights.begin(), weights.end(), 0.0f);
                 for (int k = 0; k < numOps; ++k)
-                    if ((x -= w[k]) < 0.0f)
+                    if ((x -= weights[(size_t) k]) < 0.0f)
                         return k;
                 return 0;
             }();
@@ -277,6 +334,18 @@ std::vector<PatternEvent> chopUpBars (const std::vector<ChopTraits>& chops, int 
                                 partners.push_back (h);
                     if (! partners.empty())
                         std::swap (hits[a].second, hits[partners[(size_t) rng.nextInt ((int) partners.size())]].second);
+                    break;
+                }
+                case substitute:
+                {
+                    // A chop from elsewhere in the loop takes a hit's place (alike ones first).
+                    const auto h = (size_t) rng.nextInt ((int) hits.size());
+                    std::vector<size_t> pool;
+                    for (const auto& [i, step] : placed)
+                        if (i != hits[h].second && similar (i, hits[h].second))
+                            pool.push_back (i);
+                    if (! pool.empty())
+                        hits[h].second = pool[(size_t) rng.nextInt ((int) pool.size())];
                     break;
                 }
                 case stutter:
@@ -316,7 +385,7 @@ std::vector<PatternEvent> chopUpBars (const std::vector<ChopTraits>& chops, int 
                     break;
                 }
                 case drop:
-                    if (hits.size() >= 4)
+                    if (hits.size() >= 3)
                     {
                         const auto h = 1 + (size_t) rng.nextInt ((int) hits.size() - 1);
                         if (hits[h].first != 0)
@@ -337,8 +406,7 @@ std::vector<PatternEvent> chopUpBars (const std::vector<ChopTraits>& chops, int 
                 }
                 case numOps: break;
             }
-            std::sort (hits.begin(), hits.end());
-            hits.erase (std::unique (hits.begin(), hits.end(), [] (const Hit& a, const Hit& b) { return a.first == b.first; }), hits.end());
+            tidyHits (hits);
         }
 
         // The last bar: a run to finish (now and then).
@@ -355,7 +423,7 @@ std::vector<PatternEvent> chopUpBars (const std::vector<ChopTraits>& chops, int 
             PatternEvent e;
             e.step = bar * barSteps + step;
             e.chopId = chops[index].id;
-            e.length = std::max (1, std::min (next - step, ownSteps (index)));
+            e.length = std::max (1, std::min (next - step, ownSteps (index) * (recipe == halfTime ? 2 : 1)));
             e.velocity = step % 4 == 0 ? 0.95f : (step % 2 == 0 ? 0.85f : 0.78f);
             if (const auto r = repeatsAt.find (step); r != repeatsAt.end())
             {

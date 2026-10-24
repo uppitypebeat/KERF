@@ -38,11 +38,14 @@ private:
 
 /** Step sequencer for building new phrases from chops (one bar = 16 steps).
 
-      click            place the selected chop on a step (click again to remove)
-      drag right       lengthen the step (holds the chop for several 16ths; or shift-click)
-      drag up / down   velocity
-      wheel            pitch (semitones)
-      right-click      chop, repeat (ratchet), chance, pitch, velocity, random chop, slide, clear
+      click empty step   place the selected chop (a faint preview shows which, under the mouse)
+      click a note       remove it (anywhere on it, a held one too)
+      drag its right edge  hold it longer or shorter: it runs over (merges) the steps in its way
+                           (they come back when it shrinks); dragging a note sideways does too,
+                           shift-click on a step lengthens the note before it up to there
+      drag up / down     velocity
+      wheel              pitch (semitones)
+      right-click        chop (swap), repeat (ratchet), chance, pitch, velocity, random chop, slide, clear
 
     A step shows its velocity as the height of its fill, its pitch in the corner, its
     repeats as divisions and a chance below 100 % as a dashed, fainter outline. */
@@ -57,6 +60,9 @@ public:
 
     /** The die: a pattern from the chops in a style for the tempo, as many bars as set (one undo step). */
     void randomPattern();
+
+    /** Where a step's cell is (this page), for tests: its centre and its right edge. */
+    juce::Rectangle<float> stepCell (int stepInPage) const { return cellBounds (stepInPage); }
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -88,6 +94,9 @@ private:
     std::vector<ChopParams> chops;
     juce::Rectangle<float> gridArea;
     int page = 0, hoveredStep = -1, playingStep = -1;
+    int hoveredEdge = -1; // a note whose right edge is under the mouse (its start step): dragging it sets its length
+    int edgeOf (juce::Point<float>) const; // the note whose right edge is at this point (its start step), -1 if none
+    juce::Rectangle<float> spanBounds (const PatternEvent&) const; // a note across its cells (this page)
     int dragStep = -1; // step whose length is being dragged
     std::vector<juce::ValueTree> swallowed; // steps the length drag ran over (they come back if it shrinks)
     void setDragLength (int length);

@@ -51,6 +51,19 @@ FxView::FxView (KerfAudioProcessor& p, AnimationClock& c) : processor (p), clock
     static_assert (bins == SpectrumAnalyzer::numBands, "one ring point per spectrum band");
     for (int i = 0; i < 110; ++i)
         stars.push_back ({ random.nextFloat() * twoPi, random.nextFloat(), 0.6f + 0.8f * random.nextFloat(), 0.6f + 1.4f * random.nextFloat() });
+    for (int i = 0; i < 300; ++i) // the far sky: mostly small and faint, a few bright ones
+    {
+        FarStar star;
+        star.angle = random.nextFloat() * twoPi;
+        star.radius = std::sqrt (random.nextFloat()) * 1.05f; // evenly over the area
+        const auto big = random.nextFloat();
+        star.size = 1.2f + 2.0f * big * big * big;
+        star.brightness = 0.35f + 0.65f * std::pow (random.nextFloat(), 1.5f);
+        star.twinkle = 0.15f + 0.9f * random.nextFloat();
+        star.phase = random.nextFloat() * twoPi;
+        star.tinted = random.nextFloat() < 0.15f;
+        sky.push_back (star);
+    }
     for (int i = 0; i < maxRings; ++i) // the tunnel is there from the start (quiet rings)
     {
         Ring ring;
@@ -158,6 +171,18 @@ void FxView::animationTick (double dt)
         ring.spectrum = current;
         ring.depth = 1.0f - spawn;
         rings.push_back (ring);
+    }
+
+    // The far sky drifts outwards, a little faster with the flight (the nearer ones further
+    // out move faster: depth); gone past the edge, a star comes back near the far end.
+    for (auto& star : sky)
+    {
+        star.radius += step * (0.004f + 0.05f * speed) * (0.25f + star.radius);
+        if (star.radius > 1.08f)
+        {
+            star.radius = 0.04f + 0.25f * random.nextFloat();
+            star.angle = random.nextFloat() * twoPi;
+        }
     }
 
     for (auto& star : stars)
@@ -358,6 +383,37 @@ void FxView::paintTunnel (juce::Graphics& g, juce::Rectangle<float> area)
     }
     g.setOpacity (1.0f);
     g.drawImage (vignette, area);
+
+    // The far sky: tiny stars all round, twinkling (in four brightnesses, each drawn in one
+    // go), a few in the second colour; faint where they come out of the far end.
+    {
+        const auto reach = std::hypot (area.getWidth(), area.getHeight()) * 0.5f;
+        std::array<juce::Path, 4> white, tint;
+        juce::Path halo;
+        for (const auto& star : sky)
+        {
+            const auto p = end + juce::Point<float> (std::cos (star.angle), std::sin (star.angle)) * star.radius * reach;
+            if (! area.contains (p))
+                continue;
+            const auto sparkle = 0.65f + 0.35f * std::sin (star.phase + juce::MathConstants<float>::twoPi * star.twinkle * (float) time);
+            const auto alpha = star.brightness * sparkle * juce::jlimit (0.0f, 1.0f, star.radius / 0.2f);
+            const auto band = (size_t) juce::jlimit (0, 3, (int) (alpha * 4.0f));
+            const auto r = star.size * 0.5f * (0.8f + 0.4f * sparkle);
+            (star.tinted ? tint : white)[band].addEllipse (p.x - r, p.y - r, r * 2.0f, r * 2.0f);
+            if (band == 3 && star.size > 2.0f) // the brightest: a soft halo
+                halo.addEllipse (p.x - r * 3.0f, p.y - r * 3.0f, r * 6.0f, r * 6.0f);
+        }
+        g.setColour (juce::Colours::white.withAlpha (0.07f));
+        g.fillPath (halo);
+        for (size_t b = 0; b < 4; ++b)
+        {
+            const auto alpha = 0.3f + 0.22f * (float) b;
+            g.setColour (juce::Colours::white.withAlpha (alpha));
+            g.fillPath (white[b]);
+            g.setColour (second.brighter (0.4f).withAlpha (alpha));
+            g.fillPath (tint[b]);
+        }
+    }
 
     // Stars streaking past (warp): out from the far end along the tunnel walls. In three
     // brightnesses, each drawn in one go.

@@ -82,6 +82,7 @@ private:
     /** GRAINS at 0 %: every other GRANULIZER control greyed out and locked (they do nothing then). */
     void updateGrainControls();
     juce::String chopTag() const;
+    juce::String choiceText (const char* parameterId) const; // a choice parameter's current option, upper case
     void rebindPads();
 
     std::vector<std::unique_ptr<juce::SliderParameterAttachment>> padAttachments;

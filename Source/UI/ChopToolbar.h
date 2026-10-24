@@ -45,7 +45,6 @@ private:
     ValueField minDistance { 10, 1000, 5, 0 };
     Segmented beats { { "1/2", "1", "2", "BAR" }, 1 };
     PillButton reroll { "New" };
-    CentreSlider shift { KerfAudioProcessor::maxSampleShift * 1000.0, 0.1, 1, " ms" }; // BEAT: the sample against the beat lines
     PillButton applyButton { "Apply" };
 
     Segmented scope { { "ALL", "CHOP" } };
@@ -65,6 +64,28 @@ private:
 
 /** The space between two groups of buttons in the tool row (inside a group: 4 px). */
 inline constexpr int toolbarGroupGap = 12;
+
+/** SHIFT in the tool row above the waveform (CHOP page), always at hand: moves the sample
+    against the beat lines. A sample never starts exactly on the beat, so the lines are lined
+    up with its hits here; BEAT and GRID cut on them, snapping and the metronome follow. */
+class ShiftTool final : public juce::Component, private juce::ChangeListener
+{
+public:
+    ShiftTool (KerfAudioProcessor& processor, WaveformView& waveform);
+    ~ShiftTool() override;
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+    static constexpr int labelWidth = 42, idealWidth = labelWidth + 150, minWidth = labelWidth + 90;
+
+private:
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;
+
+    KerfAudioProcessor& processor;
+    WaveformView& waveform;
+    CentreSlider slider { KerfAudioProcessor::maxSampleShift * 1000.0, 0.1, 1, " ms" };
+};
 
 /** Small tool row above the waveform (top left): KNIFE, SNAP and the bin (delete the selected chops) as symbols. */
 class WaveTools final : public juce::Component, private AnimationClock::Client

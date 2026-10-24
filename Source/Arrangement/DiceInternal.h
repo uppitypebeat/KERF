@@ -42,7 +42,8 @@ std::string varyBar (std::string bar, juce::Random& rng, float amount);
     flipped, more with every bar: chops swap places, stutter, a beat repeats or runs backwards,
     a hit drops out, a beat comes from another bar. Without a tempo (or places): the slices in
     their order and length, re-arranged the same way. */
-std::vector<PatternEvent> chopUpBars (const std::vector<ChopTraits>& chops, int bars, double bpm, double originSeconds, juce::Random& rng);
+std::vector<PatternEvent> chopUpBars (const std::vector<ChopTraits>& chops, int bars, double bpm, double originSeconds, juce::Random& rng,
+                                       juce::String* recipeName = nullptr);
 /** Where the chops sit in the loop: (index into chops, step from the grid's start), by step,
     one per step. Empty without a tempo, or when they do not lie in time (all at the start). */
 std::vector<std::pair<size_t, int>> placesInLoop (const std::vector<ChopTraits>& chops, double bpm, double originSeconds);

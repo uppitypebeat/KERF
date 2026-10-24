@@ -17,6 +17,7 @@ namespace kerf::ui
               spray sparks. CRUSH: the rings break into hard-edged polygons
       FILTER  a string of lights runs down both walls at the cutoff; what the filter removes
               goes dark (low-pass: the right of the tunnel, high-pass: the left)
+      SPACE   far stars all round, twinkling and drifting slowly outwards with the flight
       WOBBLE  the tunnel bends and snakes (TAPE: slow and uneven, CHORUS: even, and every
               ring doubled)
       PUMP    the tunnel contracts on every pump, the light at the end flashes and the flight
@@ -51,6 +52,9 @@ private:
     };
     struct Ring { std::array<float, bins> spectrum {}; float depth = 1.0f; };   // depth: 0 here .. 1 at the far end
     struct Star { float angle = 0.0f, depth = 1.0f, speed = 1.0f, size = 1.0f; };
+    // The far sky behind the tunnel: from its far end out (radius 0..1 of the screen's half
+    // diagonal), drifting slowly outwards with the flight, twinkling.
+    struct FarStar { float angle = 0.0f, radius = 0.5f, size = 1.0f, brightness = 0.5f, twinkle = 0.5f, phase = 0.0f; bool tinted = false; };
     struct Spark { juce::Point<float> pos, velocity; float age = 0.0f, life = 0.5f; };
 
     void animationTick (double dt) override;
@@ -78,6 +82,7 @@ private:
     std::array<float, bins> current {};
     std::vector<Ring> rings;
     std::vector<Star> stars;
+    std::vector<FarStar> sky;
     std::vector<Spark> sparks;
     Settings s;
     juce::Random random { 0x46582121 };

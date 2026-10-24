@@ -185,10 +185,10 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
     // With SYNC, DENSITY reads as a note value.
     {
         auto* densityParam = processor.getParameters().getParameter (Params::grainDensity);
-        auto* syncValue = processor.getParameters().getRawParameterValue (Params::grainSync);
-        grainDensity.textFromValueFunction = [densityParam, syncValue, grainsPerSecond = grainDensity.textFromValueFunction] (double v)
+        auto* syncParam = processor.getParameters().getParameter (Params::grainSync); // (not its raw copy: that one is updated later)
+        grainDensity.textFromValueFunction = [densityParam, syncParam, grainsPerSecond = grainDensity.textFromValueFunction] (double v)
         {
-            if (syncValue->load() > 0.5f)
+            if (syncParam->getValue() > 0.5f)
                 return juce::String (GrainSync::names[GrainSync::indexFor (densityParam->convertTo0to1 ((float) v))]);
             return grainsPerSecond ? grainsPerSecond (v) : juce::String (v, 0);
         };
@@ -198,6 +198,14 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
         choiceAttachments.push_back (std::move (refresh));
     }
     grainDensity.setTooltip ("Grains per second");
+
+    // The FX headers show the modes and the filter's side: drawn anew when they change.
+    for (const auto* id : { Params::dirtMode, Params::wobbleMode, Params::filter, Params::pumpMode })
+    {
+        auto header = std::make_unique<juce::ParameterAttachment> (*processor.getParameters().getParameter (id),
+                                                                   [this] (float) { repaint (0, 0, getWidth(), 26); });
+        choiceAttachments.push_back (std::move (header));
+    }
 
     // GRAINS at 0 %: the rest of the page does nothing, so it is greyed out and locked.
     {
@@ -296,11 +304,12 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
         modes.setBounds ((int) (c.getX() + heroW + 8.0f), fxY + (heroH - 22 - h) / 2 + 2, 66, h); // centred on the disc
     };
 
-    // FX page, minimal: five equal columns, each a big knob with its mode as one word under
-    // it (DELAY: its time and mode); RES and the chop's DELAY send as small knobs at the lower
-    // right of their knob. Thin lines between the columns, no headers (the knobs say what they are).
+    // FX page: five equal columns under their headers (what the group does, its setting on the
+    // right), each a big knob with its mode as one word under it (DELAY: its time and mode);
+    // RES and the chop's DELAY send as small knobs at the lower right of their knob. Thin lines
+    // between the columns.
     constexpr float fxColumn = heroW + 46.0f;
-    constexpr int fxTop = (panelHeight - (heroH + 22)) / 2;
+    constexpr int fxTop = 24 + (panelHeight - 24 - (heroH + 22)) / 2;
     auto fx = [] (juce::Rectangle<float> c, Knob& k, Segmented* modes, Knob* side, Segmented* second = nullptr)
     {
         // The knob, or the knob with its small one beside it, centred in the column as a group.
@@ -353,16 +362,21 @@ ControlPanel::ControlPanel (KerfAudioProcessor& p, AnimationClock& c)
               choke.setBounds (x + labelW + gap, selectorY, groupsW, 22);
           } },
 
-        // FX page (see fx above).
-        { {}, [] { return juce::String(); }, 1, { &space, &spaceSend, &spaceTime, &spaceMode }, 0, fxColumn,
+        // FX page (see fx above): SPACE the echoes (and how much of them this chop sends),
+        // DRIVE the distortion, MODULATION the wobble, TONE the filter, SIDECHAIN the pump.
+        { "SPACE", [this] { return chopTag() + " SEND"; }, 1, { &space, &spaceSend, &spaceTime, &spaceMode }, 0, fxColumn,
           [this, fx] (juce::Rectangle<float> c, int) { fx (c, space, &spaceTime, &spaceSend, &spaceMode); } },
-        { {}, [] { return juce::String(); }, 1, { &dirt, &dirtMode }, 0, fxColumn,
+        { "DRIVE", [this] { return choiceText (Params::dirtMode); }, 1, { &dirt, &dirtMode }, 0, fxColumn,
           [this, fx] (juce::Rectangle<float> c, int) { fx (c, dirt, &dirtMode, nullptr); } },
-        { {}, [] { return juce::String(); }, 1, { &wobble, &wobbleMode }, 0, fxColumn,
+        { "MODULATION", [this] { return choiceText (Params::wobbleMode); }, 1, { &wobble, &wobbleMode }, 0, fxColumn,
           [this, fx] (juce::Rectangle<float> c, int) { fx (c, wobble, &wobbleMode, nullptr); } },
-        { {}, [] { return juce::String(); }, 1, { &filter, &resonance }, 0, fxColumn,
+        { "TONE", [this]
+          {
+              const auto v = processor.getParameters().getRawParameterValue (Params::filter)->load();
+              return juce::String (v < -0.01f ? "LOW-PASS" : (v > 0.01f ? "HIGH-PASS" : "OPEN"));
+          }, 1, { &filter, &resonance }, 0, fxColumn,
           [this, fx] (juce::Rectangle<float> c, int) { fx (c, filter, nullptr, &resonance); } },
-        { {}, [] { return juce::String(); }, 1, { &pump, &pumpMode }, 0, fxColumn,
+        { "SIDECHAIN", [this] { return "EVERY " + choiceText (Params::pumpMode); }, 1, { &pump, &pumpMode }, 0, fxColumn,
           [this, fx] (juce::Rectangle<float> c, int) { fx (c, pump, &pumpMode, nullptr); } },
 
         // GRANULIZER page: one row of knobs, vertically centred; the switches sit at the right
@@ -546,6 +560,11 @@ std::vector<int> ControlPanel::otherSelectedChops() const
     return ids;
 }
 
+juce::String ControlPanel::choiceText (const char* parameterId) const
+{
+    return processor.getParameters().getParameter (parameterId)->getCurrentValueAsText().toUpperCase();
+}
+
 juce::String ControlPanel::chopTag() const
 {
     const auto id = selectedChopId();
@@ -562,7 +581,9 @@ juce::String ControlPanel::chopTag() const
 
 void ControlPanel::updateGrainControls()
 {
-    const auto on = processor.getParameters().getRawParameterValue (Params::grainMix)->load() > 0.0005f;
+    // (From the parameter itself: its raw copy is brought up to date after this is called.)
+    auto* mix = processor.getParameters().getParameter (Params::grainMix);
+    const auto on = mix->convertFrom0to1 (mix->getValue()) > 0.0005f;
     for (auto* c : std::initializer_list<juce::Component*> { &grainDensity, &grainSize, &grainShape, &grainSync, &grainScan, &grainPosition,
                                                             &grainSpray, &grainDrift, &grainFreeze, &grainPitchShift, &grainPitch, &grainDetune,
                                                             &grainGlide, &grainShimmer, &grainScale, &grainSpread, &grainReverse, &grainHaze })
@@ -947,8 +968,9 @@ void ControlPanel::paint (juce::Graphics& g)
             drawHairline (g, { s.area.getX(), 6.0f, 1.0f, (float) getHeight() - 12.0f });
         first = false;
 
-        // Header aligned with the section's controls.
-        const auto header = juce::Rectangle<float> (s.content.getX(), 6.0f, s.area.getRight() - s.content.getX() - 14.0f, 18.0f);
+        // Header aligned with the section's controls (centred ones: 15 px in, like the rest).
+        const auto left = std::min (s.content.getX(), s.area.getX() + 15.0f);
+        const auto header = juce::Rectangle<float> (left, 6.0f, s.area.getRight() - left - 14.0f, 18.0f);
         drawSectionHeader (g, header, s.title, s.tag ? s.tag() : juce::String());
     }
 

@@ -737,8 +737,10 @@ namespace
                   : pickStyle (options.bpm, drums, tonal, slices, placed, options.avoidStyle, rng);
         if (ctx.style == chopUp)
         {
-            ctx.form = placed ? "the loop's own groove, flipped" : "SLICES IN ORDER";
-            return chopUpBars (chops, bars, options.bpm, options.originSeconds, rng);
+            juce::String recipe;
+            auto events = chopUpBars (chops, bars, options.bpm, options.originSeconds, rng, &recipe);
+            ctx.form = placed ? "the loop's own groove, flipped: " + recipe : juce::String ("SLICES IN ORDER");
+            return events;
         }
 
         chooseTools();

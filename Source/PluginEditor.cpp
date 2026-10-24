@@ -119,7 +119,7 @@ void FooterBar::paint (juce::Graphics& g)
 
 //==============================================================================
 MainView::MainView (KerfAudioProcessor& p, AnimationClock& c)
-    : header (p, c), waveform (p, c), grainView (p, c), fxView (p, c), eqView (p, c), timeView (p, c), tools (p, waveform, c), eqTools (p, c), transport (c), toolbar (p, waveform), chopStrip (p, c), patternView (p, c),
+    : header (p, c), waveform (p, c), grainView (p, c), fxView (p, c), eqView (p, c), timeView (p, c), tools (p, waveform, c), shiftTool (p, waveform), eqTools (p, c), transport (c), toolbar (p, waveform), chopStrip (p, c), patternView (p, c),
       controls (p, c), pageTabs (controls, c), footer (p, c), recordOverlay (p, c), guide (c), pageOffVeil (controls, c), about (c), recordTools (p, c), updateOverlay (c), savePreset (p), startBurst (c), processor (p), clock (c)
 {
     setComponentID (backdropRootId); // the Nebula gradient spans this view
@@ -129,7 +129,7 @@ MainView::MainView (KerfAudioProcessor& p, AnimationClock& c)
     addChildComponent (timeView);
     clock.add (this);
     controls.onPageChanged = [this] (int page) { showViewForPage (page); };
-    for (auto* comp : std::initializer_list<juce::Component*> { &header, &pageTabs, &tools, &eqTools, &transport, &recordTools, &waveform, &toolbar, &chopStrip, &patternView, &performTabs, &controls, &footer })
+    for (auto* comp : std::initializer_list<juce::Component*> { &header, &pageTabs, &tools, &shiftTool, &eqTools, &transport, &recordTools, &waveform, &toolbar, &chopStrip, &patternView, &performTabs, &controls, &footer })
         addAndMakeVisible (comp);
     addChildComponent (pageOffVeil); // over the view and the panel, under the overlays
     addChildComponent (recordOverlay);
@@ -204,6 +204,7 @@ void MainView::updateChopRowVisibility()
     tools.setVisible (chopPage);
     eqTools.setVisible (controls.getPage() == 3);
     recordTools.setVisible (chopPage);
+    shiftTool.setVisible (chopPage);
     toolbar.setVisible (chopPage);
     performTabs.setVisible (chopPage);
     chopStrip.setVisible (chopPage && ! showSeq);
@@ -219,7 +220,7 @@ void MainView::updateChopRowVisibility()
         : page == 1 || page == 2
         ? knobHints
         : showSeq
-        ? "Drag up / down: velocity  \xc2\xb7  Wheel: pitch  \xc2\xb7  Right-click: repeat, chance, lock  \xc2\xb7  Alt + click: lock  \xc2\xb7  Drag right: length"
+        ? "Click: place / remove  \xc2\xb7  Drag the right edge: longer (merge)  \xc2\xb7  Drag up / down: velocity  \xc2\xb7  Wheel: pitch  \xc2\xb7  Right-click: chop, repeat, chance, lock"
         : "Double-click: split  \xc2\xb7  Ctrl + drag: select chops  \xc2\xb7  Drag a pad out: audio (Ctrl: MIDI)  \xc2\xb7  Space: play / stop  \xc2\xb7  Shift: no snap"));
 }
 
@@ -251,7 +252,7 @@ void MainView::resized()
     }
 
     // The page tabs at the top right; the tools in the top-left corner:
-    // [play][stop] [loop][click]   CHOP: [knife][snap]  [rec][resample]   EQ: the point types
+    // [play][stop] [loop][click]   CHOP: [knife][snap]  [rec][resample]  SHIFT   EQ: the point types
     r.removeFromTop (8);
     auto top = r.removeFromTop (24).reduced (16, 0);
     pageTabs.setBounds (top.removeFromRight (pageTabs.idealWidth()));
@@ -263,6 +264,10 @@ void MainView::resized()
         tools.setBounds (top.removeFromLeft (WaveTools::idealWidth));
         top.removeFromLeft (toolbarGroupGap);
         recordTools.setBounds (top.removeFromLeft (RecordTools::idealWidth)); // recording belongs to the chops
+        top.removeFromLeft (toolbarGroupGap + 6);
+        // SHIFT: the beat lines against the sample, always at hand (narrower if the window is).
+        shiftTool.setBounds (top.removeFromLeft (juce::jlimit (0, ShiftTool::idealWidth, top.getWidth() - toolbarGroupGap)));
+        shiftTool.setVisible (shiftTool.getWidth() >= ShiftTool::minWidth);
     }
     else if (controls.getPage() == 3)
     {

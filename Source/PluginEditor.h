@@ -76,6 +76,7 @@ public:
     EqView eqView;
     TimeView timeView;
     WaveTools tools;
+    ShiftTool shiftTool;
     EqTypeTools eqTools;
     TransportTools transport;
     ChopToolbar toolbar;

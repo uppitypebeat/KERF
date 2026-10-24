@@ -67,14 +67,6 @@ ChopToolbar::ChopToolbar (KerfAudioProcessor& p, WaveformView& w)
         if (lastAppliedMode != random) apply();
     };
 
-    addChildComponent (shift);
-    shift.setTooltip ("Moves the sample against the beat lines. Double-click: back to 0");
-    shift.onChange = [this] (double ms)
-    {
-        processor.setSampleShift (ms / 1000.0);
-        waveform.repaint();
-    };
-
     addAndMakeVisible (applyButton);
     applyButton.setTooltip ("Cut the sample with these settings");
     applyButton.onClick = [this] { apply(); };
@@ -104,9 +96,6 @@ void ChopToolbar::changeListenerCallback (juce::ChangeBroadcaster*)
     const bool needsAnalysis = m == transient || m == smart;
     const bool needsTempo = m == beat;
     applyButton.setEnabled (hasSample && (! needsAnalysis || info.onsets != nullptr) && (! needsTempo || info.sourceBpm > 0.0));
-
-    shift.setEnabled (hasSample);
-    shift.setValue (processor.getSampleShift() * 1000.0); // (undo, another sample)
 
     // A new sample starts with nothing pending.
     if (info.sample.get() != lastSample)
@@ -196,11 +185,10 @@ void ChopToolbar::showModeControls()
     sensitivity.setVisible (m == transient);
     minDistance.setVisible (m == transient);
     beats.setVisible (m == beat);
-    shift.setVisible (m == beat);
     reroll.setVisible (m == random);
 
     paramLabel = m == equal || m == random || m == smart ? "COUNT" : (m == transient ? "SENS" : (m == beat ? "BEATS" : ""));
-    paramLabel2 = m == transient ? "GAP" : (m == beat ? "SHIFT" : "");
+    paramLabel2 = m == transient ? "GAP" : "";
     changeListenerCallback (nullptr);
     repaint();
 }
@@ -239,8 +227,6 @@ void ChopToolbar::resized()
     {
         paramLabelArea = row1.removeFromLeft (46).toFloat();
         beats.setBounds (row1);
-        paramLabel2Area = row2.removeFromLeft (46).toFloat();
-        shift.setBounds (row2);
     }
     else if (m == transient)
     {
@@ -274,6 +260,42 @@ void ChopToolbar::paint (juce::Graphics& g)
 
     // Divider towards the CHOP panel on the right.
     drawHairline (g, { (float) getWidth() - 1.0f, 6.0f, 1.0f, (float) getHeight() - 12.0f });
+}
+
+//==============================================================================
+ShiftTool::ShiftTool (KerfAudioProcessor& p, WaveformView& w) : processor (p), waveform (w)
+{
+    addAndMakeVisible (slider);
+    slider.setTooltip ("SHIFT: moves the sample against the beat lines - line them up with the hits (BEAT, GRID, snapping and the metronome follow). Double-click: back to 0");
+    slider.onChange = [this] (double ms)
+    {
+        processor.setSampleShift (ms / 1000.0);
+        waveform.repaint();
+    };
+    processor.addChangeListener (this);
+    changeListenerCallback (nullptr);
+}
+
+ShiftTool::~ShiftTool()
+{
+    processor.removeChangeListener (this);
+}
+
+void ShiftTool::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    slider.setEnabled (processor.getSampleInfo().sample != nullptr);
+    slider.setValue (processor.getSampleShift() * 1000.0); // (undo, another sample)
+}
+
+void ShiftTool::resized()
+{
+    slider.setBounds (getLocalBounds().withTrimmedLeft (labelWidth).withSizeKeepingCentre (getWidth() - labelWidth, 22));
+}
+
+void ShiftTool::paint (juce::Graphics& g)
+{
+    drawText (g, "SHIFT", getLocalBounds().removeFromLeft (labelWidth).toFloat(), TextStyle::label,
+              slider.isEnabled() ? Colours::textDim : Colours::textFaint);
 }
 
 //==============================================================================

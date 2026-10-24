@@ -389,47 +389,6 @@ bool ChopModel::subdivideIntoSpans (int chopId, const std::vector<ChopSpan>& spa
     return true;
 }
 
-bool ChopModel::subdivide (int chopId, const std::vector<int64_t>& boundaries)
-{
-    auto t = findChop (chopId);
-    if (! t.isValid())
-        return false;
-
-    const auto original = fromTree (t);
-
-    std::vector<int64_t> inner;
-    for (auto b : boundaries)
-        if (b - original.start >= ChopLimits::minLength && original.end - b >= ChopLimits::minLength)
-            inner.push_back (b);
-
-    std::sort (inner.begin(), inner.end());
-    inner.erase (std::unique (inner.begin(), inner.end()), inner.end());
-
-    std::vector<int64_t> clean;
-    for (auto b : inner)
-        if (clean.empty() || b - clean.back() >= ChopLimits::minLength)
-            clean.push_back (b);
-
-    if (clean.empty())
-        return false;
-
-    // Split left to right, always splitting the newest (rightmost) piece, so the original
-    // keeps the leftmost part and new notes ascend from left to right.
-    int current = chopId;
-    for (auto b : clean)
-    {
-        if (getNumChops() >= chopLimit())
-            break;
-
-        const auto next = splitAt (b, current);
-        if (next == 0)
-            break;
-        current = next;
-    }
-
-    return true;
-}
-
 bool ChopModel::setNote (int chopId, int note)
 {
     auto t = findChop (chopId);

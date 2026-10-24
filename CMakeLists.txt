@@ -7,7 +7,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS KERF runs on")
 endif()
 
-project(KERF VERSION 1.0.0 LANGUAGES C CXX)
+project(KERF VERSION 1.1.0 LANGUAGES C CXX)
 
 # Shown to people (About, Check for updates); the plain number above is what versions compare.
 set(KERF_VERSION_LABEL "${PROJECT_VERSION}")

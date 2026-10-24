@@ -13,7 +13,7 @@ namespace
     constexpr float maxChopShare = 0.6f;        // no chop more than this share of the notes (with 4+ chops to choose from)
     constexpr float minDensityOfMode = 0.3f;    // at least this much of the mode's density ...
     constexpr float maxDensityOfMode = 2.0f;    // ... and at most this much (onsets per step)
-    constexpr float maxSimilarity = 0.72f;      // to any of the last rolls
+    constexpr float maxSimilarity = 0.45f;      // to any of the last rolls
     constexpr int maxIdenticalBarsInARow = 2;   // repetition is fine - then something must change
 
     juce::int64 barPrint (const std::vector<PatternEvent>& events, int bar)

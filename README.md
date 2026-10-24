@@ -9,7 +9,7 @@ effects and an EQ.
 
 ![KERF](docs/screenshots/README_1.png)
 
-> **Version 1.0.0.** If something breaks or feels off, please tell me (see *Feedback* below).
+> **Version 1.1.0.** If something breaks or feels off, please tell me (see *Feedback* below).
 
 ---
 
@@ -46,11 +46,14 @@ instructions.
 
 ## First steps
 
-1. **Drop a sample** onto the big waveform. KERF finds its tempo and key by itself.
-2. **Slice it**: pick GRID, BEAT, TRANS or another mode and press **APPLY**.
+1. **Drop a sample** onto the big waveform. KERF finds its tempo and key by itself (and reads
+   them from the file name when a sample pack puts them there).
+2. **Slice it**: pick GRID, BEAT, TRANS or another mode and press **APPLY**. Silent stretches
+   are left out, so every chop starts right on its sound.
 3. **Play** the pads with the mouse or your MIDI keyboard. Each chop sits on its own key.
-4. Switch to **SEQ** and click steps to build a pattern.
-5. Open **GRANULIZER**, **FX**, **TIME** and **EQ**, or try one of the 66 presets.
+4. Switch to **SEQ** and click steps to build a pattern, or roll the die for one.
+5. Open **GRANULIZER**, **FX**, **TIME** and **EQ**, try one of the 77 presets, or press
+   **Random** in the preset menu for a new sound every click.
 
 The built-in guide shows you around on first start. Open it again any time from the
 menu, top right. Every shortcut and detail is in the [manual](docs/MANUAL.md).

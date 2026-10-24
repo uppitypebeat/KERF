@@ -118,10 +118,6 @@ public:
         at most `limit` (0: one per key). */
     std::vector<ChopSpan> cleanSpans (std::vector<ChopSpan> spans, int limit = 0, int64_t maxGap = 1) const;
 
-    /** Replaces one chop with sub-chops between `boundaries` (clamped to that chop).
-        The first sub-chop keeps the original id, note and sound settings; the others get
-        new ids and the lowest free notes, and inherit the sound settings. */
-    bool subdivide (int chopId, const std::vector<int64_t>& boundaries);
 
     /** Assigns a note. If another chop already uses it, the two chops swap notes. */
     bool setNote (int chopId, int note);
